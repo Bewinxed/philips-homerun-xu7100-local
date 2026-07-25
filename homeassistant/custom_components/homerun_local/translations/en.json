@@ -37,7 +37,26 @@
       "battery": { "name": "Battery" },
       "clean_area": { "name": "Cleaned area" },
       "clean_time": { "name": "Cleaning time" },
-      "status": { "name": "Status" }
+      "status": { "name": "Status" },
+      "fault": { "name": "Fault" },
+      "side_brush": { "name": "Side brush" },
+      "main_brush": { "name": "Main brush" },
+      "filter": { "name": "Filter" },
+      "mop_cloth": { "name": "Mop cloth" },
+      "total_area": { "name": "Lifetime area" },
+      "total_cleans": { "name": "Lifetime cleans" },
+      "total_time": { "name": "Lifetime runtime" }
+    },
+    "select": {
+      "water": { "name": "Water flow" }
+    },
+    "number": {
+      "volume": { "name": "Volume" }
+    },
+    "button": {
+      "empty_bin": { "name": "Empty bin" },
+      "start_mapping": { "name": "Start mapping" },
+      "locate": { "name": "Locate" }
     },
     "camera": {
       "map": { "name": "Map" }

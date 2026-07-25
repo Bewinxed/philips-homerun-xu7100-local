@@ -3,10 +3,10 @@
   "name": "Philips HomeRun (Local)",
   "codeowners": ["@bewinxed"],
   "config_flow": true,
-  "documentation": "https://github.com/bewinxed/homerun-local",
+  "documentation": "https://github.com/Bewinxed/philips-homerun-xu7100-local",
   "integration_type": "device",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/bewinxed/homerun-local/issues",
+  "issue_tracker": "https://github.com/Bewinxed/philips-homerun-xu7100-local/issues",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

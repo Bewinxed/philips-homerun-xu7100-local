@@ -29,3 +29,8 @@ class HomeRunEntity(CoordinatorEntity[HomeRunCoordinator]):
     def data(self) -> dict:
         """Latest state object from the coordinator (never None after setup)."""
         return self.coordinator.data or {}
+
+    @property
+    def diag(self) -> dict:
+        """Latest diagnostics blob (consumables, toggles, totals, faults)."""
+        return self.coordinator.diagnostics or {}

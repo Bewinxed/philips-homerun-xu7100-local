@@ -16,7 +16,10 @@ DEFAULT_FAN_SPEEDS = ["quiet", "normal", "strong", "max"]
 UPDATE_INTERVAL_SECONDS = 5
 
 # Platforms forwarded from the config entry
-PLATFORMS = ["vacuum", "sensor", "camera"]
+PLATFORMS = ["vacuum", "sensor", "select", "switch", "number", "button", "camera"]
 
 MANUFACTURER = "Philips"
 MODEL = "HomeRun XU7100"
+
+# Water tank levels (backend enum -> friendly label)
+WATER_LEVELS = {"closed": "Off", "low": "Low", "middle": "Medium", "high": "High"}

@@ -43,12 +43,20 @@ class HomeRunCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.entry = entry
         self.client = client
+        self.diagnostics: dict[str, Any] = {}
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
-            return await self.client.async_get_state()
+            state = await self.client.async_get_state()
         except HomeRunApiError as err:
             raise UpdateFailed(str(err)) from err
+        # Diagnostics are best-effort: keep the last good copy if this poll fails,
+        # so switches/sensors don't drop out on a transient hiccup.
+        try:
+            self.diagnostics = await self.client.async_get_diagnostics()
+        except HomeRunApiError:
+            pass
+        return state
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: HomeRunConfigEntry) -> bool:
