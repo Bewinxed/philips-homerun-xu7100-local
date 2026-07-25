@@ -53,5 +53,6 @@
       <rect x="310" y="0" width="180" height="34" rx="17" fill="#22c55e" opacity="0.13"/>
       <text x="328" y="23" fill="#86efac">Home Assistant</text>
     </g>
+    <text x="2" y="292" fill="#64748b" font-size="15" font-weight="400">Unofficial. Not affiliated with Philips or Tuya.</text>
   </g>
 </svg>
