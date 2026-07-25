@@ -81,7 +81,9 @@ The `homerun` script is the entry point for everything else too: `homerun build`
 
 ## Home Assistant
 
-Copy `homeassistant/custom_components/homerun_local` into your Home Assistant `custom_components` directory and point it at the backend URL. It exposes the robot as one device: a vacuum entity, a water-flow select, switches for every mode toggle, a volume number, buttons for empty-bin and mapping, sensors for battery, consumable wear and lifetime totals, and a map camera. Everything runs through the backend, so Home Assistant never contends with the web UI for the robot's single connection. Details in [homeassistant/custom_components/homerun_local/README.md](homeassistant/custom_components/homerun_local/README.md).
+Install via **HACS** (recommended): HACS → three-dot menu → Custom repositories → add `https://github.com/Bewinxed/philips-homerun-xu7100-local` with category **Integration**, then install "Philips HomeRun (Local)" and restart. Or copy `custom_components/homerun_local` into your Home Assistant `custom_components` directory by hand.
+
+Then add the integration (Settings → Devices & Services → Add Integration → "Philips HomeRun (Local)") and point it at the backend host and port. It exposes the robot as one device: a vacuum entity, a water-flow select, switches for every mode toggle, a volume number, buttons for empty-bin and mapping, sensors for battery, consumable wear and lifetime totals, and a map camera. Everything runs through the backend, so Home Assistant never contends with the web UI for the robot's single connection. Details in [custom_components/homerun_local/README.md](custom_components/homerun_local/README.md).
 
 ## Documentation
 
