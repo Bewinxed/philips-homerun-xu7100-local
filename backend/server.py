@@ -62,6 +62,16 @@ DIST = os.path.join(ROOT, "web", "dist")
 STATIC = os.path.join(ROOT, "web", "static")
 
 
+@app.after_request
+def _cors(resp):
+    # LAN tool: let the Home Assistant custom Lovelace card (served from :8123)
+    # call this backend on :8787 from the browser.
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return resp
+
+
 @app.get("/api/state")
 def api_state():
     return jsonify(controller.state())
@@ -217,10 +227,16 @@ def _refresh_map(force=False):
 
 @app.get("/api/map")
 def api_map():
-    _refresh_map()
-    png = os.path.join(STATIC, "map.png")
-    if os.path.exists(png):
-        return send_from_directory(STATIC, "map.png", mimetype="image/png")
+    # Modern vector render (colour-filled rooms, walls, robot, dock) — the same
+    # look as the web UI, so the Home Assistant camera isn't a grey bitmap.
+    try:
+        import map_render
+        data = map_render.render_png(force=request.args.get("force") == "1")
+    except Exception as e:
+        data = None
+    if data:
+        return Response(data, mimetype="image/png",
+                        headers={"Cache-Control": "no-store"})
     return jsonify({"ok": False, "error": "no map yet — needs cloud link + a laser scan"}), 404
 
 

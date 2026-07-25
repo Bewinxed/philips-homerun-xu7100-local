@@ -85,6 +85,17 @@ Install via **HACS** (recommended): HACS → three-dot menu → Custom repositor
 
 Then add the integration (Settings → Devices & Services → Add Integration → "Philips HomeRun (Local)") and point it at the backend host and port. It exposes the robot as one device: a vacuum entity, a water-flow select, switches for every mode toggle, a volume number, buttons for empty-bin and mapping, sensors for battery, consumable wear and lifetime totals, and a map camera. Everything runs through the backend, so Home Assistant never contends with the web UI for the robot's single connection. Details in [custom_components/homerun_local/README.md](custom_components/homerun_local/README.md).
 
+### Interactive map card
+
+For a live, tappable map inside Lovelace (colour-filled rooms, robot and dock markers, tap rooms to clean), there is a custom card in [lovelace/homerun-map-card.js](lovelace/homerun-map-card.js). Copy it into `<config>/www/`, add it as a dashboard resource (`/local/homerun-map-card.js`, type module), then use:
+
+```yaml
+type: custom:homerun-map-card
+# url: http://192.168.1.50:8787   # optional; defaults to <this-host>:8787
+```
+
+The card talks to the backend directly from the browser, which is why the backend sends permissive CORS headers on `/api/*`.
+
 ## Documentation
 
 - [docs/COMMAND_PROTOCOL.md](docs/COMMAND_PROTOCOL.md) covers the datapoint map, navigation frames, and the voice frame family, verified on this robot.
