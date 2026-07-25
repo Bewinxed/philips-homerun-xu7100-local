@@ -1,0 +1,18 @@
+{
+  "device_id": "your_tuya_device_id",
+  "ip": "192.168.1.50",
+  "version": 3.3,
+  "product_key": "your_product_key",
+  "mac": "aa:bb:cc:dd:ee:ff",
+
+  "cloud": {
+    "region": "eu",
+    "endpoint": "https://openapi.tuyaeu.com",
+    "client_id": "your_tuya_cloud_access_id",
+    "client_secret": "your_tuya_cloud_access_secret",
+    "project_code": "your_project_code"
+  },
+
+  "local_key": null,
+  "_note": "Copy this to config.json and fill in your own values. local_key is filled automatically by ./getrobotkey once your Tuya cloud project is linked."
+}

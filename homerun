@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# homerun — one entrypoint for the whole local stack.
+#   homerun start     start the control server (web UI + API) on :8787
+#   homerun key       pull local_key from the cloud (after app account is linked)
+#   homerun learn     learn this robot's real DP schema (needs key)
+#   homerun map       test cloud map fetch/render
+#   homerun cloud     verify Tuya cloud credentials
+#   homerun build     rebuild the Svelte frontend into web/dist
+#   homerun scan      re-scan the LAN for the robot
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PY="$DIR/.venv/bin/python"
+export PATH="$HOME/.local/node/bin:$PATH"
+cd "$DIR"
+
+cmd="${1:-start}"
+case "$cmd" in
+  start)   echo "→ http://localhost:8787  (Ctrl-C to stop)"; exec "$PY" backend/server.py ;;
+  key)     exec "$PY" tools/pull_key.py ;;
+  learn)   shift; exec "$PY" tools/learn_dps.py "${1:-spec}" ;;
+  map)     exec "$PY" backend/cloud_map.py ;;
+  watch)   shift; exec "$PY" tools/watch_run.py "${1:-45}" ;;
+  sniff)   shift; exec "$PY" tools/dpsniff.py "${1:-300}" ;;
+  stream)  shift; exec "$PY" tools/capture_stream.py "${1:-60}" ;;
+  ports)   shift; exec "$PY" tools/fullscan.py "${1:-192.168.3.241}" ;;
+  maphunt) shift; exec "$PY" tools/map_hunt.py "$@" ;;
+  lanmap)  shift; exec "$PY" tools/lan_map.py "${1:-60}" ;;
+  voice)   shift; exec "$PY" backend/custom_voice.py "$@" ;;
+  fw)      exec "$PY" tools/firmware.py ;;
+  cloud)   exec "$PY" backend/tuya_cloud.py ;;
+  build)   cd web/app && exec npm run build ;;
+  tunnel)  echo "opening public Cloudflare tunnel to :8787 …"; exec "$HOME/.local/bin/cloudflared" tunnel --no-autoupdate --url http://localhost:8787 ;;
+  scan)    exec "$PY" backend/robot.py status 2>/dev/null || echo "no key yet — run: homerun key" ;;
+  *)       grep '^#' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
+esac

@@ -1,0 +1,57 @@
+{
+  "return_home": {
+    "dp": "None",
+    "code": "switch_charge",
+    "type": "boolean"
+  },
+  "mode": {
+    "dp": "None",
+    "code": "mode",
+    "type": "enum"
+  },
+  "fan": {
+    "dp": "None",
+    "code": "suction",
+    "type": "enum"
+  },
+  "water": {
+    "dp": "None",
+    "code": "cistern",
+    "type": "enum"
+  },
+  "locate": {
+    "dp": "None",
+    "code": "seek",
+    "type": "boolean"
+  },
+  "direction": {
+    "dp": "None",
+    "code": "direction_control",
+    "type": "enum"
+  },
+  "status": {
+    "dp": "None",
+    "code": "status",
+    "type": "enum"
+  },
+  "clean_time": {
+    "dp": "None",
+    "code": "clean_time",
+    "type": "integer"
+  },
+  "clean_area": {
+    "dp": "None",
+    "code": "clean_area",
+    "type": "integer"
+  },
+  "battery": {
+    "dp": "None",
+    "code": "electricity_left",
+    "type": "integer"
+  },
+  "fault": {
+    "dp": "None",
+    "code": "fault",
+    "type": "bitmap"
+  }
+}

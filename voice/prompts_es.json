@@ -1,0 +1,302 @@
+{
+ "01": {
+  "es": "Encendiendo",
+  "lang": "fra"
+ },
+ "02": {
+  "es": "Apagando",
+  "lang": "eng"
+ },
+ "04": {
+  "es": "Hola. Para empezar, descarga la aplicación para el robot aspirador Home Run de Philips. Podrás encontrar vídeos de demostración que te serán de gran utilidad. El manual de usuario completo también se encuentra en la aplicación del robot aspirador Home Run de Philips",
+  "lang": "spa"
+ },
+ "05": {
+  "es": "Se ha activado el modo de configuración wifi",
+  "lang": "spa"
+ },
+ "06": {
+  "es": "Conectando a la red Wi-Fi. Espera",
+  "lang": "spa"
+ },
+ "07": {
+  "es": "Conectado con éxito a la red wifi",
+  "lang": "spa"
+ },
+ "09": {
+  "es": "Cambiar mi idioma en la aplicación",
+  "lang": "spa"
+ },
+ "10": {
+  "es": "Idioma cambiado a español",
+  "lang": "spa"
+ },
+ "11": {
+  "es": "Volumen ajustado correctamente",
+  "lang": "spa"
+ },
+ "12": {
+  "es": "Iniciando mapeo. Voy a recorrer y escanear el entorno para crear un mapa. Abre las puertas de todas las habitaciones y despeja el suelo",
+  "lang": "spa"
+ },
+ "13": {
+  "es": "Mapeo completado. Volviendo a la estación para cargar",
+  "lang": "spa"
+ },
+ "15": {
+  "es": "Seguir mapeando",
+  "lang": "fra"
+ },
+ "16": {
+  "es": "El mapeo ha fallado. Despeja el suelo de obstáculos",
+  "lang": "spa"
+ },
+ "17": {
+  "es": "Iniciar limpieza",
+  "lang": "spa"
+ },
+ "18": {
+  "es": "Inicia la limpieza por zonas. Colócame en la zona que quieras limpiar",
+  "lang": "spa"
+ },
+ "19": {
+  "es": "Iniciando limpieza programada",
+  "lang": "spa"
+ },
+ "20": {
+  "es": "Estoy escaneando la sala para saber dónde estoy. Espera, por favor",
+  "lang": "spa"
+ },
+ "21": {
+  "es": "Ubicación reconocida. Empezaré a limpiar",
+  "lang": "spa"
+ },
+ "22": {
+  "es": "Nuevo entorno detectado. Voy a mapear y limpiar a la vez",
+  "lang": "spa"
+ },
+ "23": {
+  "es": "No se reconoce la sala. Comprueba la aplicación para continuar",
+  "lang": "spa"
+ },
+ "24": {
+  "es": "Limpieza en pausa",
+  "lang": "spa"
+ },
+ "25": {
+  "es": "Pausa",
+  "lang": "ind"
+ },
+ "26": {
+  "es": "Limpieza reanudada",
+  "lang": "spa"
+ },
+ "28": {
+  "es": "Limpieza completada. Volviendo a la estación para cargar",
+  "lang": "spa"
+ },
+ "29": {
+  "es": "Batería baja. Volviendo a la estación para cargar",
+  "lang": "spa"
+ },
+ "30": {
+  "es": "Volviendo a la estación para cargar",
+  "lang": "spa"
+ },
+ "32": {
+  "es": "No se puede encontrar la estación",
+  "lang": "spa"
+ },
+ "33": {
+  "es": "Entrando en modo reposo",
+  "lang": "spa"
+ },
+ "34": {
+  "es": "Llévame a la estación, por favor",
+  "lang": "spa"
+ },
+ "35": {
+  "es": "Vaciando el depósito de polvo. No me muevas, por favor",
+  "lang": "spa"
+ },
+ "36": {
+  "es": "Deteniendo el vaciado del depósito de polvo",
+  "lang": "spa"
+ },
+ "37": {
+  "es": "Recuerda instalar la bolsa para el polvo",
+  "lang": "spa"
+ },
+ "38": {
+  "es": "Cierra la tapa del contenedor",
+  "lang": "spa"
+ },
+ "40": {
+  "es": "Sustituye la bolsa para el polvo. Está llena",
+  "lang": "spa"
+ },
+ "41": {
+  "es": "Comenzando carga",
+  "lang": "ita"
+ },
+ "42": {
+  "es": "Carga completada. Continuar limpieza",
+  "lang": "spa"
+ },
+ "43": {
+  "es": "Carga completada. Continuar con la creación del mapa",
+  "lang": "spa"
+ },
+ "44": {
+  "es": "Batería baja. Llévame a la estación para cargar, por favor",
+  "lang": "spa"
+ },
+ "45": {
+  "es": "Batería baja. Espera hasta que se complete la carga, por favor",
+  "lang": "spa"
+ },
+ "46": {
+  "es": "Demasiado tiempo en espera, apagando",
+  "lang": "spa"
+ },
+ "47": {
+  "es": "Batería baja. Apagando",
+  "lang": "spa"
+ },
+ "48": {
+  "es": "Para apagarme, retírame de la estación",
+  "lang": "spa"
+ },
+ "49": {
+  "es": "No puedo limpiar ni moverme en una pendiente. Colócame en una superficie nivelada. A continuación, apágame y vuelve a encenderme antes de reiniciar",
+  "lang": "spa"
+ },
+ "50": {
+  "es": "Depósito de polvo extraído",
+  "lang": "spa"
+ },
+ "52": {
+  "es": "Depósito de polvo instalado",
+  "lang": "spa"
+ },
+ "53": {
+  "es": "Comprueba si el depósito de polvo está correctamente instalado",
+  "lang": "spa"
+ },
+ "54": {
+  "es": "Nivel de agua bajo. Recuerda rellenar el depósito de agua",
+  "lang": "spa"
+ },
+ "55": {
+  "es": "Depósito de agua extraído",
+  "lang": "spa"
+ },
+ "56": {
+  "es": "Asegúrate de que el depósito de agua está correctamente instalado. Debe estar seco por fuera. Gracias.",
+  "lang": "spa"
+ },
+ "57": {
+  "es": "Depósito de agua instalado. Debe estar seco por fuera",
+  "lang": "spa"
+ },
+ "58": {
+  "es": "Comprueba que el cepillo principal está correctamente instalado",
+  "lang": "spa"
+ },
+ "59": {
+  "es": "Comprueba que el cepillo lateral está correctamente instalado",
+  "lang": "spa"
+ },
+ "60": {
+  "es": "Limpia el prefiltro con regularidad. Consulta Mantenimiento en la aplicación para más información",
+  "lang": "spa"
+ },
+ "61": {
+  "es": "Limpia el filtro y sécalo durante veinticuatro horas antes de volver a usarlo",
+  "lang": "spa"
+ },
+ "62": {
+  "es": "Hola, ya estoy aquí",
+  "lang": "spa"
+ },
+ "63": {
+  "es": "Habitación excluida. Voy a la siguiente habitación",
+  "lang": "spa"
+ },
+ "65": {
+  "es": "Iniciando instalación de la actualización",
+  "lang": "spa"
+ },
+ "66": {
+  "es": "Actualización del sistema en curso. Espera",
+  "lang": "spa"
+ },
+ "67": {
+  "es": "Actualización del sistema en curso. Vuelve a intentarlo más tarde",
+  "lang": "spa"
+ },
+ "68": {
+  "es": "La actualización del sistema ha fallado. Inténtalo de nuevo",
+  "lang": "spa"
+ },
+ "69": {
+  "es": "La actualización se ha instalado correctamente",
+  "lang": "spa"
+ },
+ "71": {
+  "es": "Restablecer ajustes de fábrica",
+  "lang": "spa"
+ },
+ "72": {
+  "es": "Ajustes de fábrica restablecidos",
+  "lang": "spa"
+ },
+ "73": {
+  "es": "Se ha restablecido el sistema",
+  "lang": "spa"
+ },
+ "74": {
+  "es": "No se puede alcanzar el área seleccionada",
+  "lang": "spa"
+ },
+ "76": {
+  "es": "Vuelve a colocarme en el suelo para empezar",
+  "lang": "spa"
+ },
+ "77": {
+  "es": "Muéveme a una superficie nivelada para empezar",
+  "lang": "spa"
+ },
+ "78": {
+  "es": "Despeja el suelo de los obstáculos que me rodean e inténtalo de nuevo",
+  "lang": "spa"
+ },
+ "82": {
+  "es": "Ayúdame, por favor. Mi parachoques delantero está bloqueado",
+  "lang": "spa"
+ },
+ "87": {
+  "es": "Comprueba que mi sensor láser no está bloqueado",
+  "lang": "spa"
+ },
+ "89": {
+  "es": "El sensor anticaídas está bloqueado. Límpialo, por favor",
+  "lang": "spa"
+ },
+ "90": {
+  "es": "Bloqueo infantil activado",
+  "lang": "spa"
+ },
+ "93": {
+  "es": "Bloqueo infantil activado",
+  "lang": "spa"
+ },
+ "94": {
+  "es": "Hay un problema. Consulta la aplicación para saber más",
+  "lang": "spa"
+ },
+ "99": {
+  "es": "Comprueba si la contraseña wifi es correcta",
+  "lang": "spa"
+ }
+}

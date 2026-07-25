@@ -1,0 +1,43 @@
+# --- secrets (never commit) ---
+config.json
+robot_secrets.json
+devices.json
+tuya-raw.json
+snapshot.json
+voice/eleven_key.txt
+
+# --- personal / machine-local ---
+MORNING.md
+voice/studio_settings.json
+voice/state.json
+web/static/map.png
+
+# --- private data (your home map, run history) ---
+maps/*
+!maps/.gitkeep
+
+# --- generated / captured audio (large; official packs are copyrighted) ---
+voice/packages/
+voice/reference/
+voice/reference_official/
+voice/official/
+voice/custom/
+voice/custom2/
+voice/eleven/
+voice/eleven_raw/
+voice/samples/
+*.mp3
+*.zip
+
+# --- python ---
+.venv/
+pylib/
+__pycache__/
+*.pyc
+
+# --- node / build ---
+node_modules/
+web/dist/
+web/app/.svelte-kit/
+.svelte-kit/
+*.log

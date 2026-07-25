@@ -1,0 +1,149 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: hsl(222 30% 8%);
+  --foreground: hsl(210 40% 98%);
+  --card: hsl(222 28% 11%);
+  --card-foreground: hsl(210 40% 98%);
+  --popover: hsl(222 28% 11%);
+  --popover-foreground: hsl(210 40% 98%);
+  --primary: hsl(199 89% 48%);
+  --primary-foreground: hsl(222 47% 11%);
+  --secondary: hsl(217 19% 20%);
+  --secondary-foreground: hsl(210 40% 98%);
+  --muted: hsl(217 19% 18%);
+  --muted-foreground: hsl(215 20% 65%);
+  --accent: hsl(217 19% 22%);
+  --accent-foreground: hsl(210 40% 98%);
+  --destructive: hsl(0 72% 51%);
+  --destructive-foreground: hsl(210 40% 98%);
+  --border: hsl(217 19% 22%);
+  --input: hsl(217 19% 24%);
+  --ring: hsl(199 89% 48%);
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+* { border-color: var(--color-border); }
+html, body { height: 100%; }
+body {
+  color: var(--color-foreground);
+  /* Native type first: the platform font ships optical sizing + legibility tuning. */
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* Deep spatial canvas: a near-black base with two soft ambient light pools,
+     the way visionOS floats panels over depth rather than a flat fill. */
+  background:
+    radial-gradient(60rem 40rem at 12% -8%, hsl(199 89% 48% / 0.16), transparent 60%),
+    radial-gradient(55rem 42rem at 108% 8%, hsl(261 70% 55% / 0.14), transparent 55%),
+    radial-gradient(70rem 60rem at 50% 120%, hsl(190 80% 45% / 0.10), transparent 60%),
+    hsl(224 42% 5%);
+  background-attachment: fixed;
+}
+
+/* Size-specific tracking (§ Apple type): tighten large text, leave body near 0. */
+h1, .display { letter-spacing: -0.02em; }
+h2, .headline { letter-spacing: -0.015em; }
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* ---- glass materials ------------------------------------------------------ */
+/* Honest web approximation of a frosted panel: blur + a hairline top highlight
+   for a refracted edge + a tinted (not black) drop shadow. */
+.glass {
+  position: relative;
+  background: hsl(222 32% 12% / 0.55);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  border: 1px solid hsl(210 40% 98% / 0.08);
+  box-shadow:
+    inset 0 1px 0 hsl(210 40% 98% / 0.10),
+    inset 0 -1px 0 hsl(224 42% 5% / 0.40),
+    0 24px 60px -24px hsl(224 60% 3% / 0.85);
+  border-radius: var(--radius);
+}
+.glass-strong {
+  background: hsl(222 32% 14% / 0.68);
+  backdrop-filter: blur(30px) saturate(170%);
+  -webkit-backdrop-filter: blur(30px) saturate(170%);
+}
+.glass-hover { transition: border-color .25s, box-shadow .25s, transform .25s; }
+.glass-hover:hover {
+  border-color: hsl(199 89% 60% / 0.35);
+  box-shadow:
+    inset 0 1px 0 hsl(210 40% 98% / 0.14),
+    0 24px 70px -20px hsl(199 89% 20% / 0.55);
+}
+
+/* Fallback where the OS/user asks for less transparency: solid, still legible. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass, .glass-strong {
+    background: hsl(222 30% 12%);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* Segmented control (Control / Voice) — a spatial pill with a sliding thumb. */
+.seg { position: relative; display: inline-flex; padding: 4px; border-radius: 999px; }
+.seg-btn {
+  position: relative; z-index: 1; border-radius: 999px; padding: .5rem 1.1rem;
+  font-size: .875rem; font-weight: 600; color: var(--color-muted-foreground);
+  transition: color .25s; cursor: pointer; white-space: nowrap;
+}
+.seg-btn[data-active='true'] { color: var(--color-foreground); }
+.seg-thumb {
+  position: absolute; top: 4px; bottom: 4px; border-radius: 999px;
+  background: hsl(210 40% 98% / 0.10);
+  box-shadow: inset 0 1px 0 hsl(210 40% 98% / 0.18);
+  transition: transform .32s cubic-bezier(.22,1,.36,1), width .32s cubic-bezier(.22,1,.36,1);
+}
+
+/* Inner surface: a tile sitting ON a glass panel is a light fill, never a second
+   glass layer (stacking translucency kills legibility — Apple materials rule). */
+.tile {
+  background: hsl(210 40% 98% / 0.045);
+  border: 1px solid hsl(210 40% 98% / 0.06);
+  border-radius: calc(var(--radius) - 2px);
+  transition: background .2s, border-color .2s, transform .2s;
+}
+.tile-hover:hover { background: hsl(210 40% 98% / 0.07); border-color: hsl(199 89% 60% / 0.25); }
+
+/* Tactile response: feedback on press-down, instant (Apple §1). Every button
+   dips slightly when touched, so the surface feels physical, not a hyperlink. */
+button:not(:disabled) { transition: transform .12s cubic-bezier(.22,1,.36,1); }
+button:not(:disabled):active { transform: scale(.965); }
+
+/* RTL script field for the Arabic voice lines. */
+.rtl { direction: rtl; text-align: right; font-size: 1.05rem; line-height: 1.9; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important; }
+}

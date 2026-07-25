@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# getrobotkey — pull the robot's local_key from YOUR Tuya cloud project.
+# Nothing you type here is sent to Claude; it writes the key to a local file.
+set -e
+DIR="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="$DIR/pylib"
+cd "$DIR"
+
+echo "=================================================================="
+echo " Tuya key grab — you'll paste YOUR OWN Tuya IoT project API keys."
+echo " (Access ID + Access Secret from iot.tuya.com > Cloud > your project)"
+echo "=================================================================="
+# tinytuya wizard: interactive; writes devices.json + tuya-raw.json with local keys
+python3 -m tinytuya wizard
+
+# extract just OUR robot into robot_secrets.json (device id + ip come from config.json)
+python3 - <<'PY'
+import json, os
+cfg = json.load(open("config.json"))
+did = cfg["device_id"]
+ip  = cfg.get("ip", "192.168.1.50")
+out = {"device_id": did, "ip": ip, "version": 3.3}
+try:
+    devs = json.load(open("devices.json"))
+    m = next((d for d in devs if d.get("id") == did), None)
+    if m and m.get("key"):
+        out["local_key"] = m["key"]
+        out["name"] = m.get("name","")
+        json.dump(out, open("robot_secrets.json","w"), indent=2)
+        print("\n[OK] wrote robot_secrets.json — local_key captured:", m["key"][:4]+"…")
+    else:
+        print("\n[!] robot not found in devices.json (id", did, "). "
+              "Make sure it's paired in the app account you linked.")
+except FileNotFoundError:
+    print("\n[!] devices.json not written — wizard may not have completed.")
+PY

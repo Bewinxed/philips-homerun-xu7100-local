@@ -1,0 +1,46 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Philips HomeRun (Local)",
+        "description": "Enter the address of the HomeRun Local backend that talks to your robot over the LAN.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        },
+        "data_description": {
+          "host": "IP address or hostname of the machine running the HomeRun backend (server.py).",
+          "port": "TCP port the backend listens on (default 8787)."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect. Check the host and port, and that the HomeRun backend is running."
+    },
+    "abort": {
+      "already_configured": "This HomeRun backend is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HomeRun options",
+        "description": "Comma-separated list of fan speeds to offer for the vacuum.",
+        "data": {
+          "fan_speeds": "Fan speeds"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery": { "name": "Battery" },
+      "clean_area": { "name": "Cleaned area" },
+      "clean_time": { "name": "Cleaning time" },
+      "status": { "name": "Status" }
+    },
+    "camera": {
+      "map": { "name": "Map" }
+    }
+  }
+}

@@ -1,0 +1,322 @@
+{
+  "category": "sd",
+  "functions": [
+    {
+      "code": "power_go",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "pause",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "switch_charge",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "mode",
+      "type": "Enum",
+      "values": "{\"range\":[\"smart\",\"zone\",\"pose\",\"part\"]}"
+    },
+    {
+      "code": "suction",
+      "type": "Enum",
+      "values": "{\"range\":[\"gentle\",\"normal\",\"strong\"]}"
+    },
+    {
+      "code": "cistern",
+      "type": "Enum",
+      "values": "{\"range\":[\"low\",\"middle\",\"high\"]}"
+    },
+    {
+      "code": "seek",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "direction_control",
+      "type": "Enum",
+      "values": "{\"range\":[\"forward\",\"backward\",\"turn_left\",\"turn_right\",\"stop\"]}"
+    },
+    {
+      "code": "path_data",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "command_trans",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "request",
+      "type": "Enum",
+      "values": "{\"range\":[\"get_map\",\"get_path\",\"get_both\"]}"
+    },
+    {
+      "code": "reset_edge_brush",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "reset_roll_brush",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "reset_filter",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "reset_duster_cloth",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "switch_disturb",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "volume_set",
+      "type": "Integer",
+      "values": "{\"unit\":\"%\",\"min\":0,\"max\":100,\"scale\":0,\"step\":10}"
+    },
+    {
+      "code": "break_clean",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "device_timer",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "disturb_time_set",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "voice_data",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "language",
+      "type": "Enum",
+      "values": "{\"range\":[\"chinese_simplified\",\"chinese_traditional\",\"english\",\"german\",\"french\",\"russian\",\"spanish\",\"korean\",\"latin\",\"portuguese\",\"japanese\",\"italian\"]}"
+    },
+    {
+      "code": "dust_collection_num",
+      "type": "Integer",
+      "values": "{\"unit\":\"\",\"min\":0,\"max\":1,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "dust_collection_switch",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "customize_mode_switch",
+      "type": "Boolean",
+      "values": "{}"
+    }
+  ],
+  "status": [
+    {
+      "code": "power_go",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "pause",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "switch_charge",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "mode",
+      "type": "Enum",
+      "values": "{\"range\":[\"smart\",\"zone\",\"pose\",\"part\"]}"
+    },
+    {
+      "code": "status",
+      "type": "Enum",
+      "values": "{\"range\":[\"standby\",\"zone_clean\",\"part_clean\",\"cleaning\",\"paused\",\"goto_pos\",\"pos_arrived\",\"pos_unarrive\",\"goto_charge\",\"charging\",\"charge_done\",\"sleep\"]}"
+    },
+    {
+      "code": "clean_time",
+      "type": "Integer",
+      "values": "{\"unit\":\"min\",\"min\":0,\"max\":9999,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "clean_area",
+      "type": "Integer",
+      "values": "{\"unit\":\"\u33a1\",\"min\":0,\"max\":9999,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "electricity_left",
+      "type": "Integer",
+      "values": "{\"unit\":\"%\",\"min\":0,\"max\":100,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "suction",
+      "type": "Enum",
+      "values": "{\"range\":[\"gentle\",\"normal\",\"strong\"]}"
+    },
+    {
+      "code": "cistern",
+      "type": "Enum",
+      "values": "{\"range\":[\"closed\",\"low\",\"middle\",\"high\"]}"
+    },
+    {
+      "code": "seek",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "direction_control",
+      "type": "Enum",
+      "values": "{\"range\":[\"forward\",\"backward\",\"turn_left\",\"turn_right\",\"stop\"]}"
+    },
+    {
+      "code": "path_data",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "command_trans",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "request",
+      "type": "Enum",
+      "values": "{\"range\":[\"get_map\",\"get_path\",\"get_both\"]}"
+    },
+    {
+      "code": "edge_brush",
+      "type": "Integer",
+      "values": "{\"unit\":\"min\",\"min\":0,\"max\":9000,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "reset_edge_brush",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "roll_brush",
+      "type": "Integer",
+      "values": "{\"unit\":\"min\",\"min\":0,\"max\":18000,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "reset_roll_brush",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "filter",
+      "type": "Integer",
+      "values": "{\"unit\":\"min\",\"min\":0,\"max\":9000,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "reset_filter",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "duster_cloth",
+      "type": "Integer",
+      "values": "{\"unit\":\"min\",\"min\":0,\"max\":9000,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "reset_duster_cloth",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "switch_disturb",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "volume_set",
+      "type": "Integer",
+      "values": "{\"unit\":\"%\",\"min\":0,\"max\":100,\"scale\":0,\"step\":10}"
+    },
+    {
+      "code": "break_clean",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "fault",
+      "type": "Bitmap",
+      "values": "{\"label\":[\"lidar_shelter\",\"wheel_up\",\"low_battery\",\"dust_water\",\"ground_start\",\"cliff_ir\",\"co_sensor\",\"go_dock\",\"navigation\",\"escape\",\"wait_charge\",\"auto_power\",\"auto_power_b\",\"side_brush\",\"follow_ir\",\"dustbox\",\"water_level\",\"collection_bag\",\"dust_bag\",\"collection\",\"dust_bag_in\",\"collection_f\",\"on_collector\",\"collecting_box\",\"dust_frequently\",\"water_level_mop\"]}"
+    },
+    {
+      "code": "total_clean_area",
+      "type": "Integer",
+      "values": "{\"unit\":\"\u33a1\",\"min\":0,\"max\":99999,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "total_clean_count",
+      "type": "Integer",
+      "values": "{\"min\":0,\"max\":99999,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "total_clean_time",
+      "type": "Integer",
+      "values": "{\"unit\":\"min\",\"min\":0,\"max\":99999,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "device_timer",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "disturb_time_set",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "device_info",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "voice_data",
+      "type": "Raw",
+      "values": "{}"
+    },
+    {
+      "code": "language",
+      "type": "Enum",
+      "values": "{\"range\":[\"chinese_simplified\",\"chinese_traditional\",\"english\",\"german\",\"french\",\"russian\",\"spanish\",\"korean\",\"latin\",\"portuguese\",\"japanese\",\"italian\"]}"
+    },
+    {
+      "code": "dust_collection_num",
+      "type": "Integer",
+      "values": "{\"unit\":\"\",\"min\":0,\"max\":1,\"scale\":0,\"step\":1}"
+    },
+    {
+      "code": "dust_collection_switch",
+      "type": "Boolean",
+      "values": "{}"
+    },
+    {
+      "code": "customize_mode_switch",
+      "type": "Boolean",
+      "values": "{}"
+    }
+  ]
+}
