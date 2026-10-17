@@ -37,7 +37,6 @@ SUPPORTED_FEATURES = (
     | VacuumEntityFeature.STOP
     | VacuumEntityFeature.RETURN_HOME
     | VacuumEntityFeature.FAN_SPEED
-    | VacuumEntityFeature.BATTERY
     | VacuumEntityFeature.LOCATE
     | VacuumEntityFeature.STATE
 )
@@ -73,12 +72,6 @@ class HomeRunVacuum(HomeRunEntity, StateVacuumEntity):
         if raw is None:
             return None
         return STATE_TO_ACTIVITY.get(str(raw), VacuumActivity.IDLE)
-
-    @property
-    def battery_level(self) -> int | None:
-        """Return the battery level (0-100)."""
-        value = self.data.get("battery")
-        return int(value) if value is not None else None
 
     @property
     def fan_speed(self) -> str | None:
