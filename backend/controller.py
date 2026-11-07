@@ -216,12 +216,17 @@ class BaseBackend:
                 return DOCKED
             if "charg" in s:
                 return CHARGING
-            # firmware reports states Tuya's spec doesn't document (e.g. "positioning")
-            if "position" in s or "locat" in s or "relocat" in s or "goto_pos" in s:
-                return CLEANING
+            # firmware reports states Tuya's spec doesn't document (e.g. "positioning";
+            # the XU2000 spells it "repositing"). It relocalises on the way home
+            # too, so follow the mode it was given.
+            if ("position" in s or "reposit" in s or "locat" in s or "relocat" in s
+                    or "goto_pos" in s):
+                return RETURNING if self._get(raw, "mode") == "chargego" else CLEANING
             if "paus" in s:
                 return PAUSED
-            if "clean" in s or "smart" in s or "zone" in s or "part" in s or "spot" in s:
+            if ("clean" in s or "smart" in s or "zone" in s or "part" in s or "spot" in s
+                    or "room" in s or "wall_follow" in s or "map" in s
+                    or "direction" in s or "collect_dust" in s):
                 return CLEANING
             if "sleep" in s or "standby" in s or "idle" in s:
                 return IDLE
@@ -391,8 +396,10 @@ class TuyaBackend(BaseBackend):
     def refresh(self):
         data = self.dev.status()
         if isinstance(data, dict) and "dps" in data:
+            # merge: the robot pushes only changed DPs between full polls, and
+            # replacing the snapshot with those dropped battery/status to None
             with self._lock:
-                self._raw = {str(k): v for k, v in data["dps"].items()}
+                self._raw.update({str(k): v for k, v in data["dps"].items()})
                 self._last_update = time.time()
                 self.connected = True
         elif isinstance(data, dict) and data.get("Error"):
