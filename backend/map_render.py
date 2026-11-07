@@ -21,6 +21,7 @@ PATH = (255, 255, 255)
 DOCK = (34, 197, 94)
 ROBOT = (56, 189, 248)
 NOGO = (239, 68, 68)
+NOMOP = (59, 130, 246)
 # Debian/Ubuntu path first, then Alpine (font-liberation, used by the HA app)
 FONT_PATHS = ["/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
               "/usr/share/fonts/liberation/LiberationSans-Bold.ttf"]
@@ -96,8 +97,9 @@ def render_png(force: bool = False) -> bytes | None:
     # no-go zones (hatched red) and virtual walls (red lines)
     for z in vec.get("no_go_zones", []):
         poly = [tx(p) for p in z["px"]]
+        col = NOMOP if z.get("mode") == 2 else NOGO
         if len(poly) >= 3:
-            d.polygon(poly, fill=(*NOGO, 60), outline=(*NOGO, 220))
+            d.polygon(poly, fill=(*col, 60), outline=(*col, 220))
     for wall in vec.get("virtual_walls", []):
         x1, y1, x2, y2 = wall["px"]
         d.line([tx((x1, y1)), tx((x2, y2))], fill=(*NOGO, 235), width=max(2, int(0.8 * scale)))

@@ -4,21 +4,28 @@
  *  tap rooms to select them, switch floors and layers, and clean / dock / find
  *  right from the dashboard. Vanilla custom element, no build step.
  *
+ *  By default the card talks to the robot through Home Assistant (the Philips
+ *  HomeRun (Local) integration's authenticated proxy), so it works on https and
+ *  away from home too.
+ *
  *  Card config:
  *    type: custom:homerun-map-card
- *    url: http://192.168.1.50:8787   # optional; defaults to <this-host>:8787
  *    title: Timmy                     # optional
+ *    entry: <config entry id>         # optional; only with more than one robot
+ *    url: http://192.168.1.50:8787   # optional; call the backend directly instead
  *    hide: [route, nogo]              # optional; layers hidden until tapped in the legend
- *                                     # (walls, nogo, vwalls, route, dock, robot, labels)
+ *                                     # (walls, nogo, nomop, vwalls, route, dock, robot, labels)
  */
 const PALETTE = ['#38bdf8', '#f472b6', '#4ade80', '#fbbf24', '#a78bfa',
   '#fb923c', '#2dd4bf', '#f87171', '#60a5fa', '#c084fc'];
 const NOGO = '#ef4444';
+const NOMOP = '#3b82f6';
 const LAYERS_KEY = 'homerun-map-card.layers';
 // legend entries: [layer, label, swatch svg]
 const LEGEND = [
   ['walls', 'Walls', '<rect x="1" y="1" width="10" height="10" rx="1" fill="#0b1220" stroke="#94a3b8" stroke-width=".8"/>'],
   ['nogo', 'No-go zones', `<rect x="1" y="1" width="10" height="10" rx="1" fill="${NOGO}" fill-opacity=".3" stroke="${NOGO}"/>`],
+  ['nomop', 'No-mop zones', `<rect x="1" y="1" width="10" height="10" rx="1" fill="${NOMOP}" fill-opacity=".3" stroke="${NOMOP}"/>`],
   ['vwalls', 'Virtual walls', `<line x1="1.5" y1="10.5" x2="10.5" y2="1.5" stroke="${NOGO}" stroke-width="2" stroke-linecap="round"/>`],
   ['route', 'Last route', '<path d="M1 9 Q4 2 6 6 T11 3" fill="none" stroke="currentColor" stroke-width="1.4"/>'],
   ['dock', 'Dock', '<circle cx="6" cy="6" r="4" fill="#22c55e" stroke="#fff"/>'],
@@ -66,7 +73,7 @@ const CSS = `
 class HomerunMapCard extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
-    this._url = (this._config.url || `${location.protocol}//${location.hostname}:8787`).replace(/\/$/, '');
+    this._url = this._config.url ? this._config.url.replace(/\/$/, '') : null;
     this._selected = new Set();
     this._vec = null;
     this._state = null;
@@ -141,19 +148,29 @@ class HomerunMapCard extends HTMLElement {
   }
   disconnectedCallback() { clearInterval(this._t1); clearInterval(this._t2); }
 
+  // Every backend call: through Home Assistant's proxy unless a url is configured
+  _fetch(path, init = {}) {
+    if (this._url) return fetch(`${this._url}${path}`, { cache: 'no-store', ...init });
+    const sep = path.includes('?') ? '&' : '?';
+    const p = `/api/homerun_local/proxy${path}${this._config.entry ? `${sep}entry=${encodeURIComponent(this._config.entry)}` : ''}`;
+    return this._hass.fetchWithAuth(p, { cache: 'no-store', ...init });
+  }
+
   async _load() {
     try {
-      const r = await fetch(`${this._url}/api/map/vector`, { cache: 'no-store' });
+      const r = await this._fetch('/api/map/vector');
       const vec = await r.json();
       if (vec && vec.ok) { this._vec = vec; this._renderMap(); this._syncBar(); }
       else this._mapEl.innerHTML = `<div class="hm-err">${(vec && vec.error) || 'No map yet — run a mapping pass.'}</div>`;
     } catch (e) {
-      this._mapEl.innerHTML = `<div class="hm-err">Can't reach the robot backend at ${this._url}.<br>Set <code>url:</code> in the card config.</div>`;
+      this._mapEl.innerHTML = this._url
+        ? `<div class="hm-err">Can't reach the robot backend at ${esc(this._url)}.</div>`
+        : `<div class="hm-err">Can't reach the robot. Is the Philips HomeRun (Local) integration set up?</div>`;
     }
   }
   async _loadFloors() {
     try {
-      const f = await (await fetch(`${this._url}/api/floors`, { cache: 'no-store' })).json();
+      const f = await (await this._fetch('/api/floors')).json();
       this._floors = (f && f.floors) || []; this._floor = f && f.selected;
     } catch (e) { this._floors = []; }
     this._renderFloors();
@@ -168,12 +185,12 @@ class HomerunMapCard extends HTMLElement {
     if (id === this._floor) return;
     this._floor = id; this._selected.clear(); this._renderFloors(); this._syncBar();
     await this._post('/api/floors/select', { id });
-    await fetch(`${this._url}/api/map/vector?force=1`, { cache: 'no-store' }).catch(() => {});
+    await this._fetch('/api/map/vector?force=1').catch(() => {});
     this._load();
   }
   async _loadState() {
     try {
-      const s = await (await fetch(`${this._url}/api/state`, { cache: 'no-store' })).json();
+      const s = await (await this._fetch('/api/state')).json();
       this._state = s; this._renderTop();
     } catch (e) { /* keep last */ }
   }
@@ -218,8 +235,11 @@ class HomerunMapCard extends HTMLElement {
       s += `<path d="${wp}" fill="#0b1220" fill-opacity="0.9"/>`;
     }
     // robot-side no-go zones + virtual walls (non-interactive)
-    for (const z of L.nogo ? vec.no_go_zones || [] : []) {
-      s += `<path d="${this._ring(z.px)}" fill="${NOGO}" fill-opacity="0.22" stroke="${NOGO}" stroke-width="0.5" style="pointer-events:none"/>`;
+    for (const z of vec.no_go_zones || []) {
+      const nomop = z.mode === 2;
+      if (!(nomop ? L.nomop : L.nogo)) continue;
+      const col = nomop ? NOMOP : NOGO;
+      s += `<path d="${this._ring(z.px)}" fill="${col}" fill-opacity="0.22" stroke="${col}" stroke-width="0.5" style="pointer-events:none"/>`;
     }
     for (const w of L.vwalls ? vec.virtual_walls || [] : []) {
       const [x1, y1, x2, y2] = w.px;
@@ -247,9 +267,11 @@ class HomerunMapCard extends HTMLElement {
   // legend chips: how each layer is drawn, tap to show or hide it
   _renderLegend() {
     const vec = this._vec;
-    const present = { walls: vec.walls?.length, nogo: vec.no_go_zones?.length, vwalls: vec.virtual_walls?.length,
+    const zones = vec.no_go_zones || [];
+    const nNogo = zones.filter((z) => z.mode !== 2).length, nNomop = zones.length - nNogo;
+    const present = { walls: vec.walls?.length, nogo: nNogo, nomop: nNomop, vwalls: vec.virtual_walls?.length,
       route: vec.path?.length > 1, dock: vec.charger_px, robot: vec.robot_px, labels: vec.rooms?.length };
-    const count = { nogo: vec.no_go_zones?.length, vwalls: vec.virtual_walls?.length };
+    const count = { nogo: nNogo, nomop: nNomop, vwalls: vec.virtual_walls?.length };
     this._root.querySelector('[data-legend]').innerHTML = LEGEND.filter(([l]) => present[l]).map(([l, label, sw]) =>
       `<button class="hm-chip ${this._layers[l] ? '' : 'off'}" data-layer="${l}" aria-pressed="${!!this._layers[l]}">` +
       `<svg viewBox="0 0 12 12" aria-hidden="true">${sw}</svg>${label}${count[l] ? ` <small>${count[l]}</small>` : ''}</button>`).join('');
@@ -272,7 +294,7 @@ class HomerunMapCard extends HTMLElement {
 
   async _post(path, body) {
     try {
-      await fetch(`${this._url}${path}`, {
+      await this._fetch(path, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body || {})
       });

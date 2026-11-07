@@ -27,6 +27,27 @@ from controller import make_controller
 
 controller = make_controller()
 
+
+def _cfg():
+    for name in ("config.json", "robot_secrets.json"):
+        try:
+            with open(os.path.join(ROOT, name)) as f:
+                yield json.load(f)
+        except Exception:
+            yield {}
+
+
+_config, _secrets = _cfg()
+
+# Stuck watchdog (watchdog.py): frees the robot, learns no-go zones, notifies
+from notifier import Notifier
+from watchdog import Watchdog
+
+watchdog = Watchdog(controller, Notifier(_config.get("notify_targets")),
+                    _config.get("watchdog"), robot_name=_secrets.get("name") or "The robot")
+if controller.source == "robot":
+    watchdog.start()
+
 # background poller pushes state to SSE subscribers
 _subs: "list[queue.Queue]" = []
 _subs_lock = threading.Lock()
@@ -303,7 +324,40 @@ def api_map_vector():
         out["rooms"] = room_overrides.apply(list(out.get("rooms", [])))
     except Exception:
         pass
+    # On the floor the robot is on, its live zones/walls are fresher than the
+    # stored map, which the cloud only updates after the robot uploads it.
+    try:
+        act = _active_floor()
+        out["active"] = bool(act and act["id"] == out.get("floor_id"))
+        if out["active"]:
+            from stored_map import with_px
+            hdr = {"origin_x": out["origin"][0], "origin_y": out["origin"][1]}
+            live = controller.live_overlays()
+            fresh = with_px(live, hdr)
+            if live.get("zones") is not None:
+                out["no_go_zones"] = fresh["no_go_zones"]
+            if live.get("walls") is not None:
+                out["virtual_walls"] = fresh["virtual_walls"]
+    except Exception as e:
+        out["active_error"] = str(e)
+    snap = watchdog.snapshot(out.get("floor_id"))
+    out["stuck"] = [{"px": i["px"], "exact": i.get("exact"), "ts": i["ts"], "recovered": i["recovered"]}
+                    for i in snap["incidents"] if i.get("px")]
+    out["suggested_zones"] = [s for s in snap["suggestions"] if s["status"] == "suggested"]
     return jsonify(out)
+
+
+_active_cache = {"ts": 0.0, "key": None, "floor": None}
+
+
+def _active_floor():
+    """The floor the robot is on (its live zones/walls match that stored map)."""
+    live = controller.live_overlays()
+    key = json.dumps([live.get("zones"), live.get("walls")])
+    if key != _active_cache["key"] or time.time() - _active_cache["ts"] > 600:
+        from stored_map import active_floor
+        _active_cache.update(ts=time.time(), key=key, floor=active_floor(live))
+    return _active_cache["floor"]
 
 
 @app.get("/api/floors")
@@ -315,7 +369,8 @@ def api_floors():
         sel = selected_floor()
         if sel not in {f["id"] for f in fl}:
             sel = max(fl, key=lambda f: f.get("time") or 0)["id"] if fl else None
-        return jsonify({"ok": True, "floors": fl, "selected": sel})
+        act = _active_floor()
+        return jsonify({"ok": True, "floors": fl, "selected": sel, "active": act["id"] if act else None})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -331,6 +386,61 @@ def api_floors_select():
         import map_render
         map_render._cache.update(ts=0.0, png=None)
         return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.get("/api/overlays")
+def api_overlays():
+    """The robot's live no-go zones and virtual walls (command coordinates)."""
+    act = _active_floor()
+    return jsonify({"ok": True, **controller.live_overlays(), "active_floor": act["id"] if act else None})
+
+
+@app.post("/api/overlays")
+def api_overlays_set():
+    """Replace the robot's no-go zones and/or virtual walls on the floor it is on.
+
+    body: {"floor": id, "zones": [{"mode": 0|2, "px": [[x, y], ...]}], "walls": [{"px": [x1, y1, x2, y2]}]}
+    Pixel coordinates of that floor's map. Refused while a job runs or when the
+    robot is on another floor (it only accepts zones for the map it has loaded)."""
+    b = request.json or {}
+    from stored_map import floors, floor_map_bytes, parse_header, px_to_cmd, invalidate_floors
+    act = _active_floor()
+    if not act or act["id"] != b.get("floor"):
+        return jsonify({"ok": False, "error": "the robot is not on this floor; edit the floor it is on"}), 409
+    if controller.state()["state"] in ("cleaning", "returning", "paused"):
+        return jsonify({"ok": False, "error": "the robot is busy; edit zones while it is docked or idle"}), 409
+    fl = next(f for f in floors() if f["id"] == act["id"])
+    hdr = parse_header(floor_map_bytes(fl))
+    zones = walls = None
+    if "zones" in b:
+        zones = [{"mode": 2 if int(z.get("mode", 0)) == 2 else 0,
+                  "cmd": [px_to_cmd(hdr, x, y) for x, y in z["px"]]} for z in b["zones"]]
+    if "walls" in b:
+        walls = [{"cmd": [px_to_cmd(hdr, w["px"][0], w["px"][1]), px_to_cmd(hdr, w["px"][2], w["px"][3])]}
+                 for w in b["walls"]]
+    res = controller.set_overlays(zones=zones, walls=walls)
+    _vec_cache.update(ts=0, data=None)
+    _active_cache.update(key=None)
+    invalidate_floors()
+    ok = bool(res) and all(res.values())
+    return jsonify({"ok": ok, "confirmed": res,
+                    **({} if ok else {"error": "the robot did not confirm the change"})}), (200 if ok else 502)
+
+
+@app.get("/api/watchdog")
+def api_watchdog():
+    return jsonify({"ok": True, **watchdog.snapshot()})
+
+
+@app.post("/api/watchdog/suggestion")
+def api_watchdog_suggestion():
+    b = request.json or {}
+    try:
+        s = watchdog.decide(b.get("id"), b.get("action"))
+        _vec_cache.update(ts=0, data=None)
+        return jsonify({"ok": True, "suggestion": s})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 

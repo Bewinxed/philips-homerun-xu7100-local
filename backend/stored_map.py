@@ -43,7 +43,13 @@ def list_maps(file_type="collect_recode", page_size=20):
     return r.get("result", {}).get("datas", []) or []
 
 
-def download_map(map_id):
+def _store_path(map_id, key, stamp=None):
+    # The cloud updates a floor's record in place (same id, new time) when its
+    # zones or rooms change, so cached copies are keyed by upload time too.
+    return os.path.join(STORE, f"{map_id}_{stamp}_{key}.bin" if stamp else f"{map_id}_{key}.bin")
+
+
+def download_map(map_id, stamp=None):
     """Return {'app_map': bytes|None, 'robot_map': bytes|None} for a record id."""
     c, did = _cloud()
     r = c.get(f"/v1.0/users/sweepers/file/{did}/download?id={map_id}")
@@ -58,9 +64,16 @@ def download_map(map_id):
             out[key] = None
             continue
         blob = requests.get(url, timeout=30).content   # pre-signed, no auth
-        with open(os.path.join(STORE, f"{map_id}_{key}.bin"), "wb") as f:
+        with open(_store_path(map_id, key, stamp), "wb") as f:
             f.write(blob)
         out[key] = blob
+    if stamp:   # drop older copies of this record
+        for name in os.listdir(STORE):
+            if name.startswith(f"{map_id}_") and f"_{stamp}_" not in name:
+                try:
+                    os.remove(os.path.join(STORE, name))
+                except OSError:
+                    pass
     return out
 
 
@@ -141,45 +154,45 @@ def split_robot_map(b):
     return b[:end], b[end:]
 
 
+def cmd_to_px(hdr, x, y):
+    """Command coordinate -> map pixel (docs/COMMAND_PROTOCOL.md)."""
+    return [round((x + hdr["origin_x"]) / 10.0, 1), round((hdr["origin_y"] - y) / 10.0, 1)]
+
+
+def px_to_cmd(hdr, px, py):
+    return [int(round(px * 10 - hdr["origin_x"])), int(round(hdr["origin_y"] - py * 10))]
+
+
+def with_px(ov, hdr):
+    """frames.overlays() result -> the vector map's no_go_zones / virtual_walls."""
+    zones = [{"mode": z["mode"], "cmd": z["cmd"], "px": [cmd_to_px(hdr, *p) for p in z["cmd"]]}
+             for z in ov.get("zones") or []]
+    walls = [{"cmd": w["cmd"][0] + w["cmd"][1],
+              "px": cmd_to_px(hdr, *w["cmd"][0]) + cmd_to_px(hdr, *w["cmd"][1])}
+             for w in ov.get("walls") or []]
+    return {"no_go_zones": zones, "virtual_walls": walls}
+
+
 def parse_overlays(trailer, hdr):
-    """Decode the 0xAA command frames stored after the map body.
+    """Decode the 0xAA command frames stored after the map body (frames.py):
+    virtual walls (0x49) and no-go zones (0x39, mode 0 no-go / 2 no-mop), with
+    pixel copies for drawing."""
+    import frames
+    out = with_px(frames.overlays(trailer), hdr)
+    out["unknown_cmds"] = [c for c, _ in frames.parse(trailer)
+                           if c not in (frames.ZONES_GET, frames.WALLS_GET)]
+    return out
 
-    cmd 0x49  virtual walls:  flag(1) n(1) then n x (x1 y1 x2 y2)
-    cmd 0x39  no-go zones:    flag(1) n(1) then n x (mode(1) nVerts(1) + points)
-    Points are int16 BE command coords (docs/COMMAND_PROTOCOL.md); pixel copies
-    are added for drawing."""
-    def px(x, y):
-        return [round((x + hdr["origin_x"]) / 10.0, 1), round((hdr["origin_y"] - y) / 10.0, 1)]
 
-    def pts(data, n):
-        out = []
-        for i in range(n):
-            x = int.from_bytes(data[i * 4:i * 4 + 2], "big", signed=True)
-            y = int.from_bytes(data[i * 4 + 2:i * 4 + 4], "big", signed=True)
-            out.append((x, y))
-        return out
+def same_overlays(stored, live):
+    """stored has the same zones and walls as live (comparing only what live reports)."""
+    def zones(ov):
+        return sorted((z["mode"], tuple(map(tuple, z["cmd"]))) for z in ov.get("zones") or [])
 
-    walls, zones, other = [], [], []
-    i = 0
-    while i + 4 <= len(trailer) and trailer[i] == 0xAA:
-        ln = trailer[i + 2]
-        cmd, data = trailer[i + 3], trailer[i + 4:i + 3 + ln]
-        if cmd == 0x49 and len(data) >= 2:
-            for k in range(data[1]):
-                (x1, y1), (x2, y2) = pts(data[2 + k * 8:], 2)
-                walls.append({"cmd": [x1, y1, x2, y2], "px": px(x1, y1) + px(x2, y2)})
-        elif cmd == 0x39 and len(data) >= 2:
-            o = 2
-            for _ in range(data[1]):
-                mode, nv = data[o], data[o + 1]
-                p = pts(data[o + 2:], nv)
-                zones.append({"mode": mode, "cmd": [list(q) for q in p],
-                              "px": [px(*q) for q in p]})
-                o += 2 + nv * 4
-        else:
-            other.append(cmd)
-        i += 4 + ln
-    return {"virtual_walls": walls, "no_go_zones": zones, "unknown_cmds": other}
+    def walls(ov):
+        return sorted(tuple(map(tuple, w["cmd"])) for w in ov.get("walls") or [])
+    return ((live.get("zones") is None or zones(stored) == zones(live))
+            and (live.get("walls") is None or walls(stored) == walls(live)))
 
 
 # ---- floors -----------------------------------------------------------------
@@ -188,6 +201,10 @@ def parse_overlays(trailer, hdr):
 # `extend` (/tmp/mm_map_<slot>_1.bin) — the newest upload per slot wins.
 FLOOR_FILE = os.path.join(ROOT, "maps", "floor.json")
 _floor_cache = {"ts": 0.0, "data": None}
+
+
+def invalidate_floors():
+    _floor_cache.update(ts=0.0)
 
 
 def floors(max_age=600):
@@ -229,14 +246,33 @@ def current_map_bytes():
     sel = selected_floor()
     floor = next((f for f in fl if f["id"] == sel), None) \
         or max(fl, key=lambda f: f.get("time") or 0)
-    path = os.path.join(STORE, f"{floor['id']}_robot_map.bin")
+    return floor_map_bytes(floor), floor
+
+
+def floor_map_bytes(floor):
+    """robot_map bytes of one floor, downloading it when this upload isn't cached."""
+    path = _store_path(floor["id"], "robot_map", floor.get("time"))
     if not os.path.exists(path):
-        download_map(floor["id"])
+        download_map(floor["id"], floor.get("time"))
     try:
         with open(path, "rb") as f:
-            return f.read(), floor
+            return f.read()
     except FileNotFoundError:
-        return None, floor
+        return None
+
+
+def active_floor(live):
+    """The floor whose stored zones and walls match what the robot reports live
+    (frames.overlays() of DP 15), or None when there is no unambiguous match."""
+    import frames
+    if not live or (live.get("zones") is None and live.get("walls") is None):
+        return None
+    hits = []
+    for fl in floors():
+        b = floor_map_bytes(fl)
+        if b and same_overlays(frames.overlays(split_robot_map(b)[1]), live):
+            hits.append(fl)
+    return hits[0] if len(hits) == 1 else None
 
 
 def render_latest(save_png=True):

@@ -14,7 +14,10 @@
 		oncleanroom = (_id: number) => {},
 		floors = [],
 		floorId = null,
-		onfloor = (_id: number) => {}
+		onfloor = (_id: number) => {},
+		activeFloorName = null,
+		onsaveoverlays = async (_zones: any[], _walls: any[]) => false,
+		onsuggestion = (_id: string, _action: 'apply' | 'dismiss') => {}
 	}: {
 		vec: any;
 		selected?: Set<number>;
@@ -28,6 +31,9 @@
 		floors?: { id: number; name: string }[];
 		floorId?: number | null;
 		onfloor?: (id: number) => void;
+		activeFloorName?: string | null;
+		onsaveoverlays?: (zones: any[], walls: any[]) => Promise<boolean>;
+		onsuggestion?: (id: string, action: 'apply' | 'dismiss') => void;
 	} = $props();
 
 	const PALETTE = ['#38bdf8', '#f472b6', '#4ade80', '#fbbf24', '#a78bfa', '#fb923c', '#2dd4bf', '#f87171', '#60a5fa', '#c084fc'];
@@ -35,10 +41,10 @@
 	let hovered = $state<number | null>(null);
 	let zoom = $state(1);
 	// Map layers; the legend chips toggle them and the choice is kept per browser
-	type Layer = 'walls' | 'nogo' | 'vwalls' | 'route' | 'dock' | 'robot' | 'labels';
+	type Layer = 'walls' | 'nogo' | 'nomop' | 'vwalls' | 'route' | 'dock' | 'robot' | 'labels' | 'stuck';
 	const LAYERS_KEY = 'homerun.map.layers';
 	function loadLayers(): Record<Layer, boolean> {
-		const all = { walls: true, nogo: true, vwalls: true, route: true, dock: true, robot: true, labels: true };
+		const all = { walls: true, nogo: true, nomop: true, vwalls: true, route: true, dock: true, robot: true, labels: true, stuck: true };
 		try { return { ...all, ...JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') }; } catch { return all; }
 	}
 	let layers = $state(loadLayers());
@@ -47,12 +53,54 @@
 		try { localStorage.setItem(LAYERS_KEY, JSON.stringify(layers)); } catch {}
 	}
 	const NOGO = '#ef4444';
+	const NOMOP = '#3b82f6';
+	const STUCK = '#f59e0b';
+
+	// ---- zone / wall editing (only on the floor the robot is on) ----
+	type Tool = 'nogo' | 'nomop' | 'wall' | 'erase';
+	let editing = $state(false);
+	let tool = $state<Tool>('nogo');
+	let draftZones = $state<any[]>([]);
+	let draftWalls = $state<any[]>([]);
+	let drag = $state<{ a: [number, number]; b: [number, number] } | null>(null);
+	let saving = $state(false);
+	function startEdit() {
+		draftZones = (vec.no_go_zones ?? []).map((z: any) => ({ mode: z.mode, px: z.px.map((p: number[]) => [...p]) }));
+		draftWalls = (vec.virtual_walls ?? []).map((w: any) => ({ px: [...w.px] }));
+		editing = true; tool = 'nogo';
+	}
+	async function saveEdit() {
+		saving = true;
+		const ok = await onsaveoverlays(draftZones, draftWalls);
+		saving = false;
+		if (ok) editing = false;
+	}
+	function editDown(e: MouseEvent) {
+		if (tool === 'erase') return;
+		const p = toMap(e); if (p) drag = { a: p, b: p };
+	}
+	function editMove(e: MouseEvent) { if (drag) { const p = toMap(e); if (p) drag = { ...drag, b: p }; } }
+	function editUp() {
+		if (!drag) return;
+		const [[x1, y1], [x2, y2]] = [drag.a, drag.b];
+		drag = null;
+		if (Math.hypot(x2 - x1, y2 - y1) < 3) return;   // a click, not a drag
+		if (tool === 'wall') { draftWalls = [...draftWalls, { px: [x1, y1, x2, y2] }]; return; }
+		const [l, r, t, b] = [Math.min(x1, x2), Math.max(x1, x2), Math.min(y1, y2), Math.max(y1, y2)];
+		draftZones = [...draftZones, { mode: tool === 'nomop' ? 2 : 0, px: [[l, t], [r, t], [r, b], [l, b]] }];
+	}
+	const shownZones = $derived(editing ? draftZones : vec?.no_go_zones ?? []);
+	const shownWalls = $derived(editing ? draftWalls : vec?.virtual_walls ?? []);
+	const zoneCount = (mode: number) => (vec?.no_go_zones ?? []).filter((z: any) => (z.mode === 2) === (mode === 2)).length;
+
 	// legend entries that exist on this floor
 	const legend = $derived(
 		!vec?.ok ? [] : ([
 			{ id: 'walls', label: 'Walls', show: vec.walls?.length },
-			{ id: 'nogo', label: 'No-go zones', count: vec.no_go_zones?.length, show: vec.no_go_zones?.length },
+			{ id: 'nogo', label: 'No-go zones', count: zoneCount(0), show: zoneCount(0) },
+			{ id: 'nomop', label: 'No-mop zones', count: zoneCount(2), show: zoneCount(2) },
 			{ id: 'vwalls', label: 'Virtual walls', count: vec.virtual_walls?.length, show: vec.virtual_walls?.length },
+			{ id: 'stuck', label: 'Stuck spots', count: vec.stuck?.length, show: vec.stuck?.length || vec.suggested_zones?.length },
 			{ id: 'route', label: 'Last route', show: vec.path?.length },
 			{ id: 'dock', label: 'Dock', show: vec.charger_px },
 			{ id: 'robot', label: 'Last position', show: vec.robot_px },
@@ -60,6 +108,7 @@
 		] as { id: Layer; label: string; count?: number; show: unknown }[]).filter((e) => e.show)
 	);
 	let ctxRoom = $state<any>(null);
+	let pickedSuggestion = $state<any>(null);
 
 	// split mode: click two points on the map to draw the cut line
 	let splitting = $state<number | null>(null);
@@ -144,6 +193,8 @@
 					<svg viewBox="0 0 12 12" class="size-3 shrink-0" aria-hidden="true">
 						{#if e.id === 'walls'}<rect x="1" y="1" width="10" height="10" rx="1" fill="#0f172a" stroke="#94a3b8" stroke-width="0.8" />
 						{:else if e.id === 'nogo'}<rect x="1" y="1" width="10" height="10" rx="1" fill={NOGO} fill-opacity="0.3" stroke={NOGO} />
+						{:else if e.id === 'nomop'}<rect x="1" y="1" width="10" height="10" rx="1" fill={NOMOP} fill-opacity="0.3" stroke={NOMOP} />
+						{:else if e.id === 'stuck'}<path d="M3 3 L9 9 M9 3 L3 9" stroke={STUCK} stroke-width="2" stroke-linecap="round" />
 						{:else if e.id === 'vwalls'}<line x1="1.5" y1="10.5" x2="10.5" y2="1.5" stroke={NOGO} stroke-width="2" stroke-linecap="round" />
 						{:else if e.id === 'route'}<path d="M1 9 Q4 2 6 6 T11 3" fill="none" stroke="#fff" stroke-width="1.4" />
 						{:else if e.id === 'dock'}<circle cx="6" cy="6" r="4" fill="#22c55e" stroke="#fff" stroke-width="1" />
@@ -153,6 +204,26 @@
 					{e.label}{#if e.count}<span class="text-muted-foreground">{e.count}</span>{/if}
 				</button>
 			{/each}
+		</div>
+
+		<!-- zone / wall editing -->
+		<div class="flex flex-wrap items-center gap-1 text-xs">
+			{#if !editing}
+				{#if vec.active}
+					<button class="rounded-full px-3 py-1 ring-1 ring-border hover:bg-secondary" onclick={startEdit}>Edit zones and walls</button>
+				{:else if activeFloorName}
+					<span class="text-muted-foreground">The robot is on {activeFloorName}; zones can be edited on that floor.</span>
+				{/if}
+			{:else}
+				{#each [['nogo', 'No-go zone'], ['nomop', 'No-mop zone'], ['wall', 'Virtual wall'], ['erase', 'Delete']] as [id, label]}
+					<button class="rounded-full px-3 py-1 ring-1 {tool === id ? 'bg-primary/20 ring-primary/40' : 'ring-border hover:bg-secondary'}"
+						onclick={() => (tool = id as Tool)}>{label}</button>
+				{/each}
+				<span class="mx-1 text-muted-foreground">{tool === 'erase' ? 'tap a zone or wall to delete it' : 'drag on the map'}</span>
+				<button class="ml-auto rounded-full bg-primary px-3 py-1 text-primary-foreground disabled:opacity-50" disabled={saving} onclick={saveEdit}>
+					{saving ? 'Sending…' : 'Save to robot'}</button>
+				<button class="rounded-full px-3 py-1 ring-1 ring-border hover:bg-secondary" onclick={() => (editing = false)}>Cancel</button>
+			{/if}
 		</div>
 
 		{#if splitting != null}
@@ -190,21 +261,41 @@
 										{#each vec.walls as w}<rect x={w[0]} y={w[1]} width="1" height="1" />{/each}
 									</g>
 								{/if}
-								<!-- the robot's own no-go zones and virtual walls (read-only) -->
-								<g style="pointer-events:none">
-									{#if layers.nogo}
-										{#each vec.no_go_zones ?? [] as z}
+								<!-- the robot's own no-go / no-mop zones and virtual walls -->
+								<g style="pointer-events:{editing && tool === 'erase' ? 'auto' : 'none'}">
+									{#each shownZones as z, i}
+										{#if editing || (z.mode === 2 ? layers.nomop : layers.nogo)}
+											{@const col = z.mode === 2 ? NOMOP : NOGO}
 											<polygon points={z.px.map((p: number[]) => p.join(',')).join(' ')}
-												fill={NOGO} fill-opacity="0.22" stroke={NOGO} stroke-width="0.5" />
-										{/each}
-									{/if}
-									{#if layers.vwalls}
-										{#each vec.virtual_walls ?? [] as w}
+												fill={col} fill-opacity="0.22" stroke={col} stroke-width="0.5"
+												style="cursor:{editing && tool === 'erase' ? 'pointer' : 'default'}" role="presentation"
+												onclick={() => editing && tool === 'erase' && (draftZones = draftZones.filter((_, j) => j !== i))} />
+										{/if}
+									{/each}
+									{#if editing || layers.vwalls}
+										{#each shownWalls as w, i}
 											<line x1={w.px[0]} y1={w.px[1]} x2={w.px[2]} y2={w.px[3]}
-												stroke={NOGO} stroke-width="1" stroke-linecap="round" />
+												stroke={NOGO} stroke-width={editing ? 2 : 1} stroke-linecap="round" role="presentation"
+												style="cursor:{editing && tool === 'erase' ? 'pointer' : 'default'}"
+												onclick={() => editing && tool === 'erase' && (draftWalls = draftWalls.filter((_, j) => j !== i))} />
 										{/each}
 									{/if}
 								</g>
+								<!-- where it got stuck, and zones suggested from repeats -->
+								{#if layers.stuck}
+									<g style="pointer-events:none">
+										{#each vec.stuck ?? [] as s}
+											<path d={`M${s.px[0] - 2} ${s.px[1] - 2} L${s.px[0] + 2} ${s.px[1] + 2} M${s.px[0] + 2} ${s.px[1] - 2} L${s.px[0] - 2} ${s.px[1] + 2}`}
+												stroke={STUCK} stroke-width={s.exact ? 1 : 0.6} stroke-opacity={s.exact ? 1 : 0.7} stroke-linecap="round" />
+										{/each}
+									</g>
+									{#each vec.suggested_zones ?? [] as s (s.id)}
+										<polygon points={s.px.map((p: number[]) => p.join(',')).join(' ')} fill={STUCK} fill-opacity="0.15"
+											stroke={STUCK} stroke-width="0.6" stroke-dasharray="2 1.5" style="cursor:pointer" role="button" tabindex="0"
+											aria-label="Suggested no-go zone" onclick={() => (pickedSuggestion = s)}
+											onkeydown={(e) => e.key === 'Enter' && (pickedSuggestion = s)} />
+									{/each}
+								{/if}
 
 								{#if pathLine && layers.route}
 									<path d={pathLine} fill="none" stroke="#fff" stroke-opacity="0.7" stroke-width="0.6" stroke-linejoin="round" />
@@ -230,6 +321,21 @@
 											<text y="6" text-anchor="middle" font-size="4.4" fill="#0b1220" stroke="#fff" stroke-width="1.2" paint-order="stroke">{room.area_m2} m²</text>
 										</g>
 									{/each}
+								{/if}
+
+								{#if editing && tool !== 'erase'}
+									<rect x="-2" y="-2" width={vec.width + 4} height={vec.height + 4} fill="transparent"
+										style="cursor:crosshair" role="presentation"
+										onmousedown={editDown} onmousemove={editMove} onmouseup={editUp} onmouseleave={editUp} />
+									{#if drag}
+										{#if tool === 'wall'}
+											<line x1={drag.a[0]} y1={drag.a[1]} x2={drag.b[0]} y2={drag.b[1]} stroke={NOGO} stroke-width="1.5" stroke-dasharray="3 2" />
+										{:else}
+											<rect x={Math.min(drag.a[0], drag.b[0])} y={Math.min(drag.a[1], drag.b[1])}
+												width={Math.abs(drag.b[0] - drag.a[0])} height={Math.abs(drag.b[1] - drag.a[1])}
+												fill={tool === 'nomop' ? NOMOP : NOGO} fill-opacity="0.25" stroke={tool === 'nomop' ? NOMOP : NOGO} stroke-dasharray="3 2" stroke-width="0.6" />
+										{/if}
+									{/if}
 								{/if}
 
 								<!-- split overlay: captures the two clicks + previews the cut -->
@@ -281,12 +387,22 @@
 			</ContextMenu.Portal>
 		</ContextMenu.Root>
 
+		{#if pickedSuggestion}
+			<div class="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+				<span>Got stuck here {pickedSuggestion.incidents.length} times. Add a no-go zone?</span>
+				<button class="ml-auto rounded-full bg-primary px-3 py-1 text-primary-foreground"
+					onclick={() => { onsuggestion(pickedSuggestion.id, 'apply'); pickedSuggestion = null; }}>Add zone</button>
+				<button class="rounded-full px-3 py-1 ring-1 ring-border hover:bg-secondary"
+					onclick={() => { onsuggestion(pickedSuggestion.id, 'dismiss'); pickedSuggestion = null; }}>Dismiss</button>
+			</div>
+		{/if}
+
 		<p class="text-xs text-muted-foreground">
 			Right-click a room to rename, split or merge it.
 			{#if vec.route_info}
 				The last position is where the last completed run ended ({vec.route_info.points} path points); the live position isn't available locally.
 			{/if}
-			No-go zones and virtual walls are the robot's own; change them in the Smart Life app.
+			No-go zones, no-mop zones and virtual walls are stored on the robot; edit them here on the floor it is on, while it is docked.
 		</p>
 	</div>
 {/if}

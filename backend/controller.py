@@ -50,6 +50,34 @@ class BaseBackend:
         self._raw = {}
         self._last_update = 0.0
         self.connected = False
+        # last zones / walls the robot reported on DP 15 (frames.overlays shape)
+        self._overlays = {"zones": None, "walls": None, "ts": 0.0}
+        self._raw_b64 = None    # True when the robot reports raw DPs as base64
+
+    def _note_raw(self, raw):
+        """Pick the zones/walls echoes out of DP 15 as they arrive."""
+        import base64
+        import frames
+        dp = _schema_dp("command_trans")
+        val = raw.get(str(dp)) if dp else None
+        buf = frames.decode_raw(val)
+        if buf is None:
+            return
+        try:
+            base64.b64decode(val, validate=True)
+            self._raw_b64 = True
+        except Exception:
+            self._raw_b64 = False
+        ov = frames.overlays(buf)
+        with self._lock:
+            for k in ("zones", "walls"):
+                if ov[k] is not None:
+                    self._overlays[k] = ov[k]
+                    self._overlays["ts"] = time.time()
+
+    def live_overlays(self) -> dict:
+        with self._lock:
+            return dict(self._overlays)
 
     # ---- semantic state ---------------------------------------------------
     def state(self) -> dict:
@@ -303,12 +331,55 @@ class BaseBackend:
         body = bytes([cmd]) + bytes(data)
         return bytes([0xAA, 0x00, len(body)]) + body + bytes([sum(body) & 0xFF])
 
+    def _raw_value(self, frame: bytes) -> str:
+        # The XU2000 reports DP 15 as base64 and expects it back that way; the
+        # original XU7100 code sent hex, which stays the default until the
+        # robot has reported a frame.
+        import base64
+        return base64.b64encode(frame).decode() if self._raw_b64 else frame.hex()
+
     def _send_frame(self, cmd, data=b""):
         f = self._frame(cmd, data)
         dp = _schema_dp("command_trans")
         if dp:
-            self._write(dp, f.hex())
+            self._write(dp, self._raw_value(f))
         return f.hex()
+
+    def query_overlays(self):
+        """Ask the robot to report its no-go zones and virtual walls (read-only)."""
+        import frames
+        self._send_frame(frames.ZONES_GET)
+        self._send_frame(frames.WALLS_GET)
+
+    def set_overlays(self, zones=None, walls=None, timeout=12.0) -> dict:
+        """Write no-go zones and/or virtual walls (command coordinates) and wait
+        for the robot to echo them back. Returns {'zones': ok, 'walls': ok}."""
+        import frames
+        from stored_map import same_overlays
+        want = {"zones": zones, "walls": walls}
+        before = self.live_overlays()["ts"]
+        if zones is not None:
+            self._send_frame(frames.ZONES_SET, frames.encode_zones(zones))
+        if walls is not None:
+            self._send_frame(frames.WALLS_SET, frames.encode_walls(walls))
+        result = {k: None for k, v in want.items() if v is not None}
+        end = time.time() + timeout
+        while time.time() < end and None in result.values():
+            time.sleep(0.5)
+            live = self.live_overlays()
+            if live["ts"] <= before:
+                continue
+            for k in result:
+                if live.get(k) is not None:
+                    result[k] = same_overlays({k: live[k]}, {k: want[k]})
+        return {k: bool(v) for k, v in result.items()}
+
+    def resume(self):
+        """Carry on with the interrupted job (unlike start(), which begins a new one)."""
+        p = _schema_dp("pause")
+        if p: self._write(p, False)
+        g = _schema_dp("power")
+        if g: self._write(g, True)
 
     def clean_rooms(self, room_ids, passes=1):
         """cmd 0x14: clean selected rooms.
@@ -361,7 +432,7 @@ class BaseBackend:
         frame = bytes([0xAA, 0x00, len(body)]) + body + bytes([sum(body) & 0xFF])
         dp = _schema_dp("command_trans")
         if dp:
-            self._write(dp, frame.hex())
+            self._write(dp, self._raw_value(frame))
             m = _schema_dp("mode")
             if m: self._write(m, "pose")
             p = _schema_dp("power")
@@ -404,6 +475,7 @@ class TuyaBackend(BaseBackend):
                 self._raw.update({str(k): v for k, v in data["dps"].items()})
                 self._last_update = time.time()
                 self.connected = True
+            self._note_raw({str(k): v for k, v in data["dps"].items()})
         elif isinstance(data, dict) and data.get("Error"):
             self.connected = False
         return self.raw()

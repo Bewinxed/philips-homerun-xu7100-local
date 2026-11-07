@@ -8,10 +8,13 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import HomeRunApiClient, HomeRunApiError
+from .proxy import HomeRunProxyView
 from .const import (
     CONF_HOST,
     CONF_PORT,
@@ -24,6 +27,14 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 type HomeRunConfigEntry = ConfigEntry["HomeRunCoordinator"]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the map card's authenticated pass-through to the backend."""
+    hass.http.register_view(HomeRunProxyView())
+    return True
 
 
 class HomeRunCoordinator(DataUpdateCoordinator[dict[str, Any]]):

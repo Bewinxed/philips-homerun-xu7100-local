@@ -3,7 +3,7 @@
 	import { toast } from 'svelte-sonner';
 	import {
 		api, diagnostics, startMapping, drive, toggle, setVolume,
-		mapVector, floors as getFloors, selectFloor, cleanRooms, renameRoom, mergeRooms, unmergeRoom, splitRoom, unsplitRoom, roomAttrs, emptyBin,
+		mapVector, floors as getFloors, selectFloor, saveOverlays, decideSuggestion, cleanRooms, renameRoom, mergeRooms, unmergeRoom, splitRoom, unsplitRoom, roomAttrs, emptyBin,
 		type RobotState, type MapMeta, type Diagnostics, type Floor
 	} from '$lib/api';
 	import { area, dur } from '$lib/format';
@@ -41,8 +41,23 @@
 	// one stored map per floor; the choice only changes what we show, not the robot
 	let floorList = $state<Floor[]>([]);
 	let floorId = $state<number | null>(null);
+	let activeFloor = $state<number | null>(null);
+	const activeFloorName = $derived(floorList.find((f) => f.id === activeFloor)?.name ?? null);
 	async function loadFloors() {
-		try { const f = await getFloors(); floorList = f.floors ?? []; floorId = f.selected; } catch {}
+		try { const f = await getFloors(); floorList = f.floors ?? []; floorId = f.selected; activeFloor = f.active; } catch {}
+	}
+	async function doSaveOverlays(zones: any[], walls: any[]) {
+		if (floorId == null) return false;
+		toast('Sending zones to the robot…');
+		const r = await saveOverlays(floorId, zones, walls).catch(() => ({ ok: false, error: 'backend unreachable' }));
+		if (r.ok) toast.success('The robot confirmed the new zones'); else toast.error(r.error ?? 'Not saved');
+		await reloadVector(true);
+		return r.ok;
+	}
+	async function doSuggestion(id: string, action: 'apply' | 'dismiss') {
+		const r = await decideSuggestion(id, action).catch(() => ({ ok: false, error: 'backend unreachable' }));
+		if (!r.ok) toast.error(r.error ?? 'Failed'); else toast(action === 'apply' ? 'No-go zone added' : 'Suggestion dismissed');
+		await reloadVector(true);
 	}
 	async function switchFloor(id: number) {
 		floorId = id;
@@ -281,6 +296,7 @@
 						</button>
 					</div>
 					<MapView {vec} bind:selected floors={floorList} {floorId} onfloor={switchFloor}
+						{activeFloorName} onsaveoverlays={doSaveOverlays} onsuggestion={doSuggestion}
 						onrename={ctxRename} onmerge={ctxMerge} onunmerge={doUnmerge}
 						onsplit={ctxSplit} onunsplit={ctxUnsplit} oncleanroom={ctxCleanRoom} />
 
