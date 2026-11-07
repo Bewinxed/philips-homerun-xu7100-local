@@ -76,7 +76,7 @@ except Exception as e:
 
 with open(os.path.join(ROOT, "robot_secrets.json"), "w") as f:
     json.dump(secrets, f, indent=2)
-print(f"\n[OK] wrote robot_secrets.json — local_key = {local_key[:4]}… (len {len(local_key)})")
+print(f"\n[OK] wrote robot_secrets.json — local_key received (len {len(local_key)})")
 print(f"     device online: {res.get('online')}, name: {res.get('name','')}")
 
 # Pull DP specification to refine the semantic schema
