@@ -113,6 +113,8 @@ class BaseBackend:
         """What this model supports, so the UI and HA only offer real controls."""
         return {
             "model": MODEL,
+            # the robot's own name from the cloud (robot_secrets.json), if known
+            "name": (getattr(self, "cfg", None) or {}).get("name") or None,
             "schema": SCHEMA_SOURCE,
             "fan_levels": _schema_values("fan"),
             "water_levels": _schema_values("water"),

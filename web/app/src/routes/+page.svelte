@@ -196,8 +196,8 @@
 				<Radar class="size-6" />
 			</div>
 			<div>
-				<h1 class="text-xl font-semibold">Subhiyya</h1>
-				<p class="text-sm text-muted-foreground">Philips HomeRun · XU7100</p>
+				<h1 class="text-xl font-semibold">{diag?.capabilities?.name || 'HomeRun'}</h1>
+				<p class="text-sm text-muted-foreground">Philips {diag?.capabilities?.model ?? 'HomeRun'}</p>
 			</div>
 		</div>
 		<div class="flex items-center gap-2">

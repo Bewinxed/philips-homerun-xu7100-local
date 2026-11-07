@@ -129,6 +129,17 @@
 									<g fill="#0f172a" fill-opacity="0.85">
 										{#each vec.walls as w}<rect x={w[0]} y={w[1]} width="1" height="1" />{/each}
 									</g>
+									<!-- the robot's own no-go zones and virtual walls (read-only) -->
+									<g style="pointer-events:none">
+										{#each vec.no_go_zones ?? [] as z}
+											<polygon points={z.px.map((p: number[]) => p.join(',')).join(' ')}
+												fill="#ef4444" fill-opacity="0.22" stroke="#ef4444" stroke-width="0.5" />
+										{/each}
+										{#each vec.virtual_walls ?? [] as w}
+											<line x1={w.px[0]} y1={w.px[1]} x2={w.px[2]} y2={w.px[3]}
+												stroke="#ef4444" stroke-width="1" stroke-linecap="round" />
+										{/each}
+									</g>
 								{/if}
 
 								{#if pathLine}
