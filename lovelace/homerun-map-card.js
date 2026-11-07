@@ -1,21 +1,32 @@
-/*! HomeRun Map Card — an interactive robot-vacuum map for Home Assistant.
+/*! HomeRun Map Card v0.5.0 — an interactive robot-vacuum map for Home Assistant.
  *  Renders the vector map from the HomeRun Local backend (rooms, walls, the
  *  robot's no-go zones and virtual walls, robot, dock, last path), lets you
  *  tap rooms to select them, switch floors and layers, and clean / dock / find
  *  right from the dashboard. Vanilla custom element, no build step.
  *
- *  By default the card talks to the robot through Home Assistant (the Philips
- *  HomeRun (Local) integration's authenticated proxy), so it works on https and
- *  away from home too.
+ *  The card only talks to Home Assistant itself (same origin, your login), so it
+ *  works on homeassistant.local, through Home Assistant Cloud and on a custom
+ *  domain, and the app needs no open port:
+ *    - proxy:   the Philips HomeRun (Local) integration's authenticated proxy
+ *               (/api/homerun_local/proxy/...); works for every user
+ *    - ingress: the app's Supervisor ingress (/api/hassio_ingress/...); needs an
+ *               administrator, like every ingress page
+ *    - auto (default): proxy, falling back to ingress when the integration
+ *               isn't set up
  *
  *  Card config:
  *    type: custom:homerun-map-card
  *    title: Timmy                     # optional
- *    entry: <config entry id>         # optional; only with more than one robot
- *    url: http://192.168.1.50:8787   # optional; call the backend directly instead
+ *    connection: auto                 # optional; auto | proxy | ingress
+ *    entry: <config entry id>         # optional; proxy, only with more than one robot
+ *    app: 7b10aef2_homerun-local      # optional; ingress, the app's slug (found by itself)
+ *    url: http://192.168.1.50:8787   # optional; call the backend directly (needs its port open)
  *    hide: [route, nogo]              # optional; layers hidden until tapped in the legend
  *                                     # (walls, nogo, nomop, vwalls, route, dock, robot, labels)
  */
+// Own scope: a second copy (an old resource next to the Marketplace one) must
+// not clash on these names, and define() below skips if the card already exists.
+(() => {
 const PALETTE = ['#38bdf8', '#f472b6', '#4ade80', '#fbbf24', '#a78bfa',
   '#fb923c', '#2dd4bf', '#f87171', '#60a5fa', '#c084fc'];
 const NOGO = '#ef4444';
@@ -148,24 +159,71 @@ class HomerunMapCard extends HTMLElement {
   }
   disconnectedCallback() { clearInterval(this._t1); clearInterval(this._t2); }
 
-  // Every backend call: through Home Assistant's proxy unless a url is configured
-  _fetch(path, init = {}) {
+  // Every backend call goes through Home Assistant (see the header) unless a url is set
+  async _fetch(path, init = {}) {
     if (this._url) return fetch(`${this._url}${path}`, { cache: 'no-store', ...init });
-    const sep = path.includes('?') ? '&' : '?';
-    const p = `/api/homerun_local/proxy${path}${this._config.entry ? `${sep}entry=${encodeURIComponent(this._config.entry)}` : ''}`;
-    return this._hass.fetchWithAuth(p, { cache: 'no-store', ...init });
+    const mode = this._config.connection || 'auto';
+    if (mode !== 'ingress' && this._route !== 'ingress') {
+      const sep = path.includes('?') ? '&' : '?';
+      const p = `/api/homerun_local/proxy${path}${this._config.entry ? `${sep}entry=${encodeURIComponent(this._config.entry)}` : ''}`;
+      const r = await this._hass.fetchWithAuth(p, { cache: 'no-store', ...init });
+      if (mode === 'proxy' || !(await this._noProxy(r))) {
+        this._route = 'proxy';
+        return r;
+      }
+      this._route = 'ingress';   // auto: the integration isn't there, use the app's ingress
+    }
+    const base = await this._ingressBase();
+    const r = await fetch(`${base}${path.slice(1)}`, { cache: 'no-store', credentials: 'same-origin', ...init });
+    if (r.status === 401 || r.status === 403) {   // session expired: once more with a new one
+      this._ingress = null;
+      return fetch(`${await this._ingressBase()}${path.slice(1)}`, { cache: 'no-store', credentials: 'same-origin', ...init });
+    }
+    return r;
+  }
+
+  // A 404 that means "no proxy here": Home Assistant's own (plain text, the
+  // integration isn't installed) or the view's "no HomeRun backend" (not set up).
+  // A JSON 404 from the backend itself, e.g. "no stored map yet", is a real answer.
+  async _noProxy(r) {
+    if (r.status !== 404) return false;
+    if (!(r.headers.get('content-type') || '').includes('json')) return true;
+    const body = await r.clone().json().catch(() => ({}));
+    return body.error === 'no HomeRun backend';
+  }
+
+  // Supervisor ingress: an ingress session cookie for /api/hassio_ingress/, the
+  // same way Home Assistant opens an app's sidebar page (administrators only).
+  async _ingressBase() {
+    if (this._ingress && Date.now() < this._ingressUntil) return this._ingress;
+    const sv = (endpoint, method = 'get') => this._hass.callWS({ type: 'supervisor/api', endpoint, method });
+    let slug = this._config.app;
+    if (!slug) {
+      const apps = await sv('/addons');
+      const found = (apps.addons || []).find((a) => /(^|_)homerun-local$/.test(a.slug) && a.state === 'started');
+      if (!found) throw new Error('HomeRun Local app not found');
+      slug = found.slug;
+    }
+    const info = await sv(`/addons/${slug}/info`);
+    const session = await sv('/ingress/session', 'post');
+    document.cookie = `ingress_session=${session.session}; path=/api/hassio_ingress/; SameSite=Strict`
+      + (location.protocol === 'https:' ? '; Secure' : '');
+    this._ingress = info.ingress_url || `${info.ingress_entry}/`;
+    this._ingressUntil = Date.now() + 10 * 60 * 1000;   // sessions last 15 minutes
+    return this._ingress;
   }
 
   async _load() {
     try {
       const r = await this._fetch('/api/map/vector');
-      const vec = await r.json();
+      const vec = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
       if (vec && vec.ok) { this._vec = vec; this._renderMap(); this._syncBar(); }
-      else this._mapEl.innerHTML = `<div class="hm-err">${(vec && vec.error) || 'No map yet — run a mapping pass.'}</div>`;
+      else this._mapEl.innerHTML = `<div class="hm-err">${esc((vec && vec.error) || 'No map yet — run a mapping pass.')}</div>`;
     } catch (e) {
+      console.warn('homerun-map-card:', e);
       this._mapEl.innerHTML = this._url
         ? `<div class="hm-err">Can't reach the robot backend at ${esc(this._url)}.</div>`
-        : `<div class="hm-err">Can't reach the robot. Is the Philips HomeRun (Local) integration set up?</div>`;
+        : `<div class="hm-err">Can't reach the robot (${esc(e.message || e)}). Set up the Philips HomeRun (Local) integration, or use an administrator account for the app's ingress.</div>`;
     }
   }
   async _loadFloors() {
@@ -316,11 +374,13 @@ class HomerunMapCard extends HTMLElement {
   }
 }
 
-customElements.define('homerun-map-card', HomerunMapCard);
+// Loaded twice (an old resource next to the Marketplace one) must not break the card
+if (!customElements.get('homerun-map-card')) customElements.define('homerun-map-card', HomerunMapCard);
 window.customCards = window.customCards || [];
-window.customCards.push({
+if (!window.customCards.some((c) => c.type === 'homerun-map-card')) window.customCards.push({
   type: 'homerun-map-card',
   name: 'HomeRun Map',
   description: 'Interactive robot-vacuum map: floors, layers and a legend; tap rooms to clean, dock, or locate.'
 });
 console.info('%c HOMERUN-MAP-CARD %c loaded ', 'background:#0ea5e9;color:#031;font-weight:700', '');
+})();

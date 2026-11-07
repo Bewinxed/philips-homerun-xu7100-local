@@ -93,14 +93,7 @@ Then add the integration (Settings → Devices & Services → Add Integration �
 
 ### Interactive map card
 
-For a live, tappable map inside Lovelace (colour-filled rooms, robot and dock markers, tap rooms to clean), there is a custom card in [lovelace/homerun-map-card.js](lovelace/homerun-map-card.js). Copy it into `<config>/www/`, add it as a dashboard resource (`/local/homerun-map-card.js`, type module), then use:
-
-```yaml
-type: custom:homerun-map-card
-# url: http://192.168.1.50:8787   # optional; defaults to <this-host>:8787
-```
-
-The card talks to the backend directly from the browser, which is why the backend sends permissive CORS headers on `/api/*`.
+The map card lives in its own repository so the Marketplace (HACS) can install it as a dashboard card: [coen1111/homerun-map-card](https://github.com/coen1111/homerun-map-card). It shows the floors, rooms, no-go and no-mop zones, virtual walls, dock and last route, and cleans the rooms you tap. It talks only to Home Assistant itself (this integration's authenticated proxy, or the Home Assistant app's ingress), so it works on https and away from home without opening the backend's port. `lovelace/homerun-map-card.js` is a copy for manual installs.
 
 ## Documentation
 
