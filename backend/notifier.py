@@ -19,9 +19,22 @@ import time
 import requests
 
 
+def _container_env(name):
+    """A container variable. The HA base images start the app through s6-overlay
+    with a reset environment and keep the container's variables as files."""
+    if os.environ.get(name):
+        return os.environ[name]
+    try:
+        with open(f"/run/s6/container_environment/{name}") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
 def _api():
-    if os.environ.get("SUPERVISOR_TOKEN"):
-        return "http://supervisor/core/api", os.environ["SUPERVISOR_TOKEN"]
+    token = _container_env("SUPERVISOR_TOKEN")
+    if token:
+        return "http://supervisor/core/api", token
     if os.environ.get("HA_URL") and os.environ.get("HA_TOKEN"):
         return os.environ["HA_URL"].rstrip("/") + "/api", os.environ["HA_TOKEN"]
     return None, None
