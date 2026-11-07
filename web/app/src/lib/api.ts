@@ -68,6 +68,10 @@ export const gotoPoint = (x: number, y: number) => post('api/goto', { x, y });
 
 export const mapVector = (force = false) =>
 	fetch('api/map/vector' + (force ? '?force=1' : '')).then((r) => r.json());
+export type Floor = { id: number; name: string; time?: number };
+export const floors = () =>
+	fetch('api/floors').then((r) => r.json() as Promise<{ ok: boolean; floors: Floor[]; selected: number | null }>);
+export const selectFloor = (id: number) => post('api/floors/select', { id });
 export const cleanRooms = (rooms: number[], passes = 1) => post('api/rooms/clean', { rooms, passes });
 export const renameRoom = (id: number, name: string) => post('api/rooms/rename', { id, name });
 export const mergeRooms = (a: number, b: number) => post('api/rooms/merge', { a, b });

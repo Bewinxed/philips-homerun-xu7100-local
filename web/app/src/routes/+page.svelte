@@ -3,8 +3,8 @@
 	import { toast } from 'svelte-sonner';
 	import {
 		api, diagnostics, startMapping, drive, toggle, setVolume,
-		mapVector, cleanRooms, renameRoom, mergeRooms, unmergeRoom, splitRoom, unsplitRoom, roomAttrs, emptyBin,
-		type RobotState, type MapMeta, type Diagnostics
+		mapVector, floors as getFloors, selectFloor, cleanRooms, renameRoom, mergeRooms, unmergeRoom, splitRoom, unsplitRoom, roomAttrs, emptyBin,
+		type RobotState, type MapMeta, type Diagnostics, type Floor
 	} from '$lib/api';
 	import { area, dur } from '$lib/format';
 	import { materialize, rise } from '$lib/transitions';
@@ -37,6 +37,19 @@
 	let editVal = $state('');
 
 	async function reloadVector(force = false) { try { vec = await mapVector(force); } catch {} }
+
+	// one stored map per floor; the choice only changes what we show, not the robot
+	let floorList = $state<Floor[]>([]);
+	let floorId = $state<number | null>(null);
+	async function loadFloors() {
+		try { const f = await getFloors(); floorList = f.floors ?? []; floorId = f.selected; } catch {}
+	}
+	async function switchFloor(id: number) {
+		floorId = id;
+		selected = new Set();
+		await selectFloor(id);
+		await reloadVector(true);
+	}
 
 	const SUCTION = [
 		{ value: 'gentle', label: 'Gentle' }, { value: 'normal', label: 'Normal' },
@@ -175,6 +188,7 @@
 		es.onmessage = (e) => { try { s = JSON.parse(e.data); } catch {} };
 		es.onerror = () => {};
 		refreshMap();
+		loadFloors();
 		diagnostics().then((v) => (diag = v)).catch(() => {});
 		const mapTimer = setInterval(() => reloadVector(), 8000);
 		const diagTimer = setInterval(() => diagnostics().then((v) => (diag = v)).catch(() => {}), 15000);
@@ -266,7 +280,7 @@
 							<RotateCw class="size-4" /> Refresh
 						</button>
 					</div>
-					<MapView {vec} bind:selected
+					<MapView {vec} bind:selected floors={floorList} {floorId} onfloor={switchFloor}
 						onrename={ctxRename} onmerge={ctxMerge} onunmerge={doUnmerge}
 						onsplit={ctxSplit} onunsplit={ctxUnsplit} oncleanroom={ctxCleanRoom} />
 

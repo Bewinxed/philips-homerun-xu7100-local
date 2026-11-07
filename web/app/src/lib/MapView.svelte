@@ -11,7 +11,10 @@
 		onunmerge = (_id: number) => {},
 		onsplit = (_id: number, _line: number[]) => {},
 		onunsplit = (_id: number) => {},
-		oncleanroom = (_id: number) => {}
+		oncleanroom = (_id: number) => {},
+		floors = [],
+		floorId = null,
+		onfloor = (_id: number) => {}
 	}: {
 		vec: any;
 		selected?: Set<number>;
@@ -22,14 +25,40 @@
 		onsplit?: (id: number, line: number[]) => void;
 		onunsplit?: (id: number) => void;
 		oncleanroom?: (id: number) => void;
+		floors?: { id: number; name: string }[];
+		floorId?: number | null;
+		onfloor?: (id: number) => void;
 	} = $props();
 
 	const PALETTE = ['#38bdf8', '#f472b6', '#4ade80', '#fbbf24', '#a78bfa', '#fb923c', '#2dd4bf', '#f87171', '#60a5fa', '#c084fc'];
 
 	let hovered = $state<number | null>(null);
 	let zoom = $state(1);
-	let showWalls = $state(true);
-	let showLabels = $state(true);
+	// Map layers; the legend chips toggle them and the choice is kept per browser
+	type Layer = 'walls' | 'nogo' | 'vwalls' | 'route' | 'dock' | 'robot' | 'labels';
+	const LAYERS_KEY = 'homerun.map.layers';
+	function loadLayers(): Record<Layer, boolean> {
+		const all = { walls: true, nogo: true, vwalls: true, route: true, dock: true, robot: true, labels: true };
+		try { return { ...all, ...JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') }; } catch { return all; }
+	}
+	let layers = $state(loadLayers());
+	function flip(l: Layer) {
+		layers[l] = !layers[l];
+		try { localStorage.setItem(LAYERS_KEY, JSON.stringify(layers)); } catch {}
+	}
+	const NOGO = '#ef4444';
+	// legend entries that exist on this floor
+	const legend = $derived(
+		!vec?.ok ? [] : ([
+			{ id: 'walls', label: 'Walls', show: vec.walls?.length },
+			{ id: 'nogo', label: 'No-go zones', count: vec.no_go_zones?.length, show: vec.no_go_zones?.length },
+			{ id: 'vwalls', label: 'Virtual walls', count: vec.virtual_walls?.length, show: vec.virtual_walls?.length },
+			{ id: 'route', label: 'Last route', show: vec.path?.length },
+			{ id: 'dock', label: 'Dock', show: vec.charger_px },
+			{ id: 'robot', label: 'Last position', show: vec.robot_px },
+			{ id: 'labels', label: 'Room names', show: vec.rooms?.length }
+		] as { id: Layer; label: string; count?: number; show: unknown }[]).filter((e) => e.show)
+	);
 	let ctxRoom = $state<any>(null);
 
 	// split mode: click two points on the map to draw the cut line
@@ -88,11 +117,42 @@
 			<span class="opacity-50">·</span>
 			<span>{vec.rooms.length} rooms</span>
 			<div class="ml-auto flex gap-1">
-				<button class="rounded px-2 py-0.5 hover:bg-secondary {showWalls ? 'text-foreground' : ''}" onclick={() => (showWalls = !showWalls)}>walls</button>
-				<button class="rounded px-2 py-0.5 hover:bg-secondary {showLabels ? 'text-foreground' : ''}" onclick={() => (showLabels = !showLabels)}>labels</button>
 				<button class="rounded px-2 py-0.5 hover:bg-secondary" onclick={() => (zoom = Math.min(4, zoom * 1.4))}>＋</button>
 				<button class="rounded px-2 py-0.5 hover:bg-secondary" onclick={() => (zoom = Math.max(1, zoom / 1.4))}>－</button>
 			</div>
+		</div>
+
+		{#if floors.length > 1}
+			<div class="flex flex-wrap items-center gap-1 text-xs" role="tablist" aria-label="Floor">
+				<span class="mr-1 text-muted-foreground">Floor</span>
+				{#each floors as f (f.id)}
+					<button role="tab" aria-selected={f.id === floorId}
+						class="rounded-full px-3 py-1 ring-1 transition-colors {f.id === floorId
+							? 'bg-primary/20 text-foreground ring-primary/40'
+							: 'text-muted-foreground ring-border hover:bg-secondary'}"
+						onclick={() => f.id !== floorId && onfloor(f.id)}>{f.name}</button>
+				{/each}
+			</div>
+		{/if}
+
+		<!-- legend: every chip shows how the layer is drawn and switches it on or off -->
+		<div class="flex flex-wrap gap-1 text-xs">
+			{#each legend as e (e.id)}
+				<button aria-pressed={layers[e.id]} title={(layers[e.id] ? 'Hide ' : 'Show ') + e.label.toLowerCase()}
+					class="flex items-center gap-1.5 rounded-full px-2.5 py-1 ring-1 ring-border transition-opacity hover:bg-secondary {layers[e.id] ? '' : 'opacity-40 line-through'}"
+					onclick={() => flip(e.id)}>
+					<svg viewBox="0 0 12 12" class="size-3 shrink-0" aria-hidden="true">
+						{#if e.id === 'walls'}<rect x="1" y="1" width="10" height="10" rx="1" fill="#0f172a" stroke="#94a3b8" stroke-width="0.8" />
+						{:else if e.id === 'nogo'}<rect x="1" y="1" width="10" height="10" rx="1" fill={NOGO} fill-opacity="0.3" stroke={NOGO} />
+						{:else if e.id === 'vwalls'}<line x1="1.5" y1="10.5" x2="10.5" y2="1.5" stroke={NOGO} stroke-width="2" stroke-linecap="round" />
+						{:else if e.id === 'route'}<path d="M1 9 Q4 2 6 6 T11 3" fill="none" stroke="#fff" stroke-width="1.4" />
+						{:else if e.id === 'dock'}<circle cx="6" cy="6" r="4" fill="#22c55e" stroke="#fff" stroke-width="1" />
+						{:else if e.id === 'robot'}<circle cx="6" cy="6" r="4" fill="#38bdf8" stroke="#fff" stroke-width="1" />
+						{:else}<text x="6" y="9.5" text-anchor="middle" font-size="9" font-weight="700" fill="currentColor">A</text>{/if}
+					</svg>
+					{e.label}{#if e.count}<span class="text-muted-foreground">{e.count}</span>{/if}
+				</button>
+			{/each}
 		</div>
 
 		{#if splitting != null}
@@ -125,41 +185,45 @@
 										onmouseleave={() => (hovered = null)} />
 								{/each}
 
-								{#if showWalls}
+								{#if layers.walls}
 									<g fill="#0f172a" fill-opacity="0.85">
 										{#each vec.walls as w}<rect x={w[0]} y={w[1]} width="1" height="1" />{/each}
 									</g>
-									<!-- the robot's own no-go zones and virtual walls (read-only) -->
-									<g style="pointer-events:none">
+								{/if}
+								<!-- the robot's own no-go zones and virtual walls (read-only) -->
+								<g style="pointer-events:none">
+									{#if layers.nogo}
 										{#each vec.no_go_zones ?? [] as z}
 											<polygon points={z.px.map((p: number[]) => p.join(',')).join(' ')}
-												fill="#ef4444" fill-opacity="0.22" stroke="#ef4444" stroke-width="0.5" />
+												fill={NOGO} fill-opacity="0.22" stroke={NOGO} stroke-width="0.5" />
 										{/each}
+									{/if}
+									{#if layers.vwalls}
 										{#each vec.virtual_walls ?? [] as w}
 											<line x1={w.px[0]} y1={w.px[1]} x2={w.px[2]} y2={w.px[3]}
-												stroke="#ef4444" stroke-width="1" stroke-linecap="round" />
+												stroke={NOGO} stroke-width="1" stroke-linecap="round" />
 										{/each}
-									</g>
-								{/if}
+									{/if}
+								</g>
 
-								{#if pathLine}
+								{#if pathLine && layers.route}
 									<path d={pathLine} fill="none" stroke="#fff" stroke-opacity="0.7" stroke-width="0.6" stroke-linejoin="round" />
 								{/if}
 
-								{#if vec.charger_px}
+								{#if vec.charger_px && layers.dock}
 									<g transform={`translate(${vec.charger_px[0]},${vec.charger_px[1]})`}>
 										<circle r="4" fill="#22c55e" fill-opacity="0.25" />
 										<circle r="2" fill="#22c55e" stroke="#fff" stroke-width="0.5" />
 									</g>
 								{/if}
-								{#if vec.robot_px}
+								{#if vec.robot_px && layers.robot}
 									<g transform={`translate(${vec.robot_px[0]},${vec.robot_px[1]})`}>
 										<circle r="5" fill="#38bdf8" fill-opacity="0.3" />
 										<circle r="2.5" fill="#38bdf8" stroke="#fff" stroke-width="0.6" />
 									</g>
 								{/if}
 
-								{#if showLabels}
+								{#if layers.labels}
 									{#each vec.rooms.filter((r) => (r.group ?? r.id) === r.id) as room (room.id)}
 										<g transform={`translate(${room.centroid[0]},${room.centroid[1]})`} style="pointer-events:none">
 											<text text-anchor="middle" font-size="6" font-weight="600" fill="#0b1220" stroke="#fff" stroke-width="1.6" paint-order="stroke">{room.name}</text>
@@ -218,12 +282,11 @@
 		</ContextMenu.Root>
 
 		<p class="text-xs text-muted-foreground">
+			Right-click a room to rename, split or merge it.
 			{#if vec.route_info}
-				<span class="text-primary">Blue</span> = where it ended last run ({vec.route_info.points} path points),
-				<span class="text-emerald-400">green</span> = dock. Live position isn't available locally, so this is the last completed run.
-			{:else}
-				<span class="text-emerald-400">Green</span> = dock. Right-click a room to rename, split, or merge it.
+				The last position is where the last completed run ended ({vec.route_info.points} path points); the live position isn't available locally.
 			{/if}
+			No-go zones and virtual walls are the robot's own; change them in the Smart Life app.
 		</p>
 	</div>
 {/if}
