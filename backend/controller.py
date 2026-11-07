@@ -518,10 +518,16 @@ def make_controller():
     if cfg.get("local_key"):
         try:
             b = TuyaBackend(cfg)
-            b.refresh()
-            return b
         except Exception as e:
             print(f"[controller] real backend failed ({e}); using simulator")
+            return SimBackend()
+        # An asleep or briefly unreachable robot must not swap in the simulator
+        # for good: keep the real backend, the poll loop retries.
+        try:
+            b.refresh()
+        except Exception as e:
+            print(f"[controller] robot not reachable yet ({e}); retrying in the poll loop")
+        return b
     return SimBackend()
 
 

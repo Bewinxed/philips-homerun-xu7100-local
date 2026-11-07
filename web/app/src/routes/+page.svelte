@@ -171,7 +171,7 @@
 
 	onMount(() => {
 		api.state().then((v) => (s = v));
-		const es = new EventSource('/api/events');
+		const es = new EventSource('api/events');
 		es.onmessage = (e) => { try { s = JSON.parse(e.data); } catch {} };
 		es.onerror = () => {};
 		refreshMap();

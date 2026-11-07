@@ -21,7 +21,10 @@ PATH = (255, 255, 255)
 DOCK = (34, 197, 94)
 ROBOT = (56, 189, 248)
 NOGO = (239, 68, 68)
-FONT_PATH = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+# Debian/Ubuntu path first, then Alpine (font-liberation, used by the HA app)
+FONT_PATHS = ["/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+              "/usr/share/fonts/liberation/LiberationSans-Bold.ttf"]
+FONT_PATH = next((p for p in FONT_PATHS if os.path.exists(p)), FONT_PATHS[0])
 
 _cache = {"ts": 0.0, "png": None}
 
