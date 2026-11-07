@@ -60,7 +60,7 @@ CODE_TO_SEMANTIC = {
     "language": "language",
     "dust_collection_num": "dust_collect_num",
     "dust_collection_switch": "dust_collect",
-    "customize_mode_switch": "customize_mode",
+    "customize_mode_switch": "customize_mode", "custom_mode_switch": "customize_mode",
     "mop_state": "mop_state",
     "work_mode": "work_mode",
     "auto_boost": "auto_boost",
@@ -70,7 +70,10 @@ CODE_TO_SEMANTIC = {
     "clean_count": "clean_count",
     "remote_control_mode": "remote_mode",
     "create_map": "create_map",
-    "sweep_count": "sweep_count",
+    "sweep_count": "sweep_count", "clean_times": "sweep_count",
+    "skip_room": "skip_room",
+    "mop_seated": "mop_seated",
+    "map_id": "map_id",
     "no_mopping_zones": "no_mop_zones",
     "remaining_charging_time": "charge_time_left",
     "map_num": "map_num",
@@ -104,8 +107,12 @@ def from_thing_model(model: dict) -> dict:
             for k in ("min", "max", "unit", "scale", "step"):
                 if k in spec:
                     entry[k] = spec[k]
-            if "label" in spec:
+            # some models (XU2000) only publish bit numbers; don't pass those
+            # off as names, the controller then labels them fault_bit_<n>
+            if spec.get("label") and not all(str(l).isdigit() for l in spec["label"]):
                 entry["labels"] = spec["label"]
+            elif spec.get("type") == "bitmap":
+                entry["maxlen"] = spec.get("maxlen") or len(spec.get("label") or [])
             name = CODE_TO_SEMANTIC.get(code, code)
             if name in out:     # two codes for one meaning: keep the first
                 name = code

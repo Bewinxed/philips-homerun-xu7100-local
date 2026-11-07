@@ -143,7 +143,13 @@ class BaseBackend:
         f = self._get(raw, "fault")
         if isinstance(f, int):
             d["fault_code"] = f
-            bits = (SCHEMA.get("fault") or {}).get("labels") or self.FAULT_BITS
+            fs = SCHEMA.get("fault") or {}
+            if fs.get("labels"):
+                bits = fs["labels"]
+            elif SCHEMA_SOURCE == "dp_schema.json":
+                bits = self.FAULT_BITS
+            else:   # model publishes no names: don't guess with the XU7100's
+                bits = [f"fault_bit_{i}" for i in range(max(fs.get("maxlen") or 0, f.bit_length()))]
             names = [n for i, n in enumerate(bits) if f & (1 << i)]
             d["faults"] = names
             d["fault_detail"] = [

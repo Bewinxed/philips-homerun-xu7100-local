@@ -80,12 +80,11 @@ def learn_model():
         secrets = json.load(open(p))
     did = cfg["device_id"]
     c = TuyaCloud(cfg)
-    pid = secrets.get("product_id")
-    if not pid:
-        det = c.device_detail(did)
-        if not det.get("success"):
-            sys.exit(f"device detail failed: {det.get('code')} {det.get('msg')}")
-        pid = det["result"].get("product_id")
+    det = c.device_detail(did)
+    if not det.get("success"):
+        sys.exit(f"device detail failed: {det.get('code')} {det.get('msg')}")
+    pid = det["result"].get("product_id")
+    model = det["result"].get("model")
     r = c.thing_model(did)
     if not r.get("success"):
         sys.exit(f"thing model failed: {r.get('code')} {r.get('msg')}")
@@ -94,13 +93,13 @@ def learn_model():
     out = os.path.join(schema.MODELS, f"{pid}.json")
     doc = {"_comment": f"Generated from /v2.0/cloud/thing/{{id}}/model for product {pid} "
                        f"on {time.strftime('%Y-%m-%d')}. Edit '_model' to name the robot."}
-    doc["_model"] = secrets.get("name") or pid
+    doc["_model"] = f"HomeRun {model}" if model else pid
     doc.update(sch)
     json.dump(doc, open(out, "w"), indent=2)
     print(f"{len(sch)} datapoints\n")
     for name, e in sorted(sch.items(), key=lambda kv: int(kv[1]["dp"])):
         extra = e.get("values") or (f"{e.get('min')}..{e.get('max')}" if "max" in e else "")
-        known = "" if name != e["code"] else "   (unmapped)"
+        known = "" if e["code"] in schema.CODE_TO_SEMANTIC else "   (unmapped)"
         print(f"  DP {e['dp']:>4}  {name:<18} {e['code']:<26} {e.get('type',''):<7} {extra}{known}")
     print(f"\n[OK] wrote {out}")
     if secrets and secrets.get("product_id") != pid:
