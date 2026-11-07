@@ -41,4 +41,3 @@ web/dist/
 web/app/.svelte-kit/
 .svelte-kit/
 *.log
-robot_secrets.laptop.json
