@@ -332,11 +332,12 @@ class BaseBackend:
         return bytes([0xAA, 0x00, len(body)]) + body + bytes([sum(body) & 0xFF])
 
     def _raw_value(self, frame: bytes) -> str:
-        # The XU2000 reports DP 15 as base64 and expects it back that way; the
-        # original XU7100 code sent hex, which stays the default until the
-        # robot has reported a frame.
+        # The XU2000 reports DP 15 as base64 and only acts on base64 (hex is
+        # ignored, verified). The original XU7100 code sent hex, so the
+        # hand-made XU7100 schema keeps hex until the robot reports a frame.
         import base64
-        return base64.b64encode(frame).decode() if self._raw_b64 else frame.hex()
+        b64 = self._raw_b64 if self._raw_b64 is not None else SCHEMA_SOURCE != "dp_schema.json"
+        return base64.b64encode(frame).decode() if b64 else frame.hex()
 
     def _send_frame(self, cmd, data=b""):
         f = self._frame(cmd, data)
@@ -363,16 +364,60 @@ class BaseBackend:
         if walls is not None:
             self._send_frame(frames.WALLS_SET, frames.encode_walls(walls))
         result = {k: None for k, v in want.items() if v is not None}
-        end = time.time() + timeout
+        sent = time.time()
+        end = sent + timeout
         while time.time() < end and None in result.values():
             time.sleep(0.5)
             live = self.live_overlays()
             if live["ts"] <= before:
-                continue
+                # The robot answers with a DP 15 report that the LAN status poll
+                # doesn't pass on (seen on the XU2000); the cloud has it within a
+                # second or two.
+                if time.time() - sent > 3:
+                    time.sleep(1.5)
+                    live = self._cloud_overlays(sent) or live
+                if live["ts"] <= before:
+                    continue
             for k in result:
                 if live.get(k) is not None:
                     result[k] = same_overlays({k: live[k]}, {k: want[k]})
-        return {k: bool(v) for k, v in result.items()}
+        ok = {k: bool(v) for k, v in result.items()}
+        with self._lock:
+            for k, good in ok.items():
+                if good:
+                    self._overlays[k] = want[k]
+                    self._overlays["ts"] = time.time()
+        return ok
+
+    def refresh_overlays(self, max_age=600):
+        """Take the robot's zones/walls from its last cloud report when ours are
+        older than max_age (edits made in the Smart Life app, missed LAN reports)."""
+        if time.time() - self.live_overlays()["ts"] < max_age:
+            return
+        ov = self._cloud_overlays(0)
+        with self._lock:
+            if ov:
+                for k in ("zones", "walls"):
+                    if ov[k] is not None:
+                        self._overlays[k] = ov[k]
+            self._overlays["ts"] = time.time()   # also after a failed fetch: retry in max_age
+
+    def _cloud_overlays(self, since):
+        """The robot's last DP 15 report from the cloud, if it is newer than `since`."""
+        import frames
+        try:
+            from tuya_cloud import TuyaCloud, load_cfg
+            cfg = load_cfg()
+            r = TuyaCloud(cfg).get(f"/v2.0/cloud/thing/{cfg['device_id']}/shadow/properties?codes=command_trans")
+            p = (r.get("result") or {}).get("properties", [{}])[0]
+        except Exception:
+            return None
+        if not p.get("time") or p["time"] / 1000 < since - 1:
+            return None
+        buf = frames.decode_raw(p.get("value"))
+        if buf is None:
+            return None
+        return {**frames.overlays(buf), "ts": p["time"] / 1000}
 
     def resume(self):
         """Carry on with the interrupted job (unlike start(), which begins a new one)."""
@@ -467,16 +512,37 @@ class TuyaBackend(BaseBackend):
         self.dev.set_socketTimeout(6)
 
     def refresh(self):
-        data = self.dev.status()
-        if isinstance(data, dict) and "dps" in data:
-            # merge: the robot pushes only changed DPs between full polls, and
-            # replacing the snapshot with those dropped battery/status to None
+        # status() returns the NEXT message on the persistent socket. The robot
+        # also pushes changes by itself (and answers every write), so reading
+        # one message per poll falls further and further behind: the app showed
+        # "charging, 73%" while the robot was at 83% and off the dock. Drain
+        # everything queued after the query and apply it in arrival order.
+        msgs = [self.dev.status()]
+        self.dev.set_socketTimeout(0.4)
+        try:
+            for _ in range(100):
+                m = self.dev.receive()
+                if not m or not isinstance(m, dict) or "Err" in m:
+                    break
+                msgs.append(m)
+        except Exception:
+            pass
+        finally:
+            self.dev.set_socketTimeout(6)
+        got = False
+        for data in msgs:
+            if isinstance(data, dict) and isinstance(data.get("dps"), dict):
+                dps = {str(k): v for k, v in data["dps"].items()}
+                # merge: pushes carry only the DPs that changed
+                with self._lock:
+                    self._raw.update(dps)
+                self._note_raw(dps)
+                got = True
+        if got:
             with self._lock:
-                self._raw.update({str(k): v for k, v in data["dps"].items()})
                 self._last_update = time.time()
                 self.connected = True
-            self._note_raw({str(k): v for k, v in data["dps"].items()})
-        elif isinstance(data, dict) and data.get("Error"):
+        elif isinstance(msgs[0], dict) and msgs[0].get("Error"):
             self.connected = False
         return self.raw()
 

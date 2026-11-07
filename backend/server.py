@@ -352,6 +352,10 @@ _active_cache = {"ts": 0.0, "key": None, "floor": None}
 
 def _active_floor():
     """The floor the robot is on (its live zones/walls match that stored map)."""
+    try:
+        controller.refresh_overlays()
+    except Exception:
+        pass
     live = controller.live_overlays()
     key = json.dumps([live.get("zones"), live.get("walls")])
     if key != _active_cache["key"] or time.time() - _active_cache["ts"] > 600:
@@ -432,6 +436,16 @@ def api_overlays_set():
 @app.get("/api/watchdog")
 def api_watchdog():
     return jsonify({"ok": True, **watchdog.snapshot()})
+
+
+@app.post("/api/watchdog/test-notify")
+def api_watchdog_test_notify():
+    """Send a test notification the way the watchdog would; returns who it reached."""
+    n = watchdog.n
+    if not n.available:
+        return jsonify({"ok": False, "error": "no Home Assistant API (only inside the app)"}), 400
+    who = n.send(f"{watchdog.name_}: test", "This is how a stuck robot is reported.", tag="homerun_test")
+    return jsonify({"ok": True, "reached": who})
 
 
 @app.post("/api/watchdog/suggestion")
