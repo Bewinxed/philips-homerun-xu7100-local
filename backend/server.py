@@ -266,18 +266,15 @@ def api_map_vector():
         data = _vec_cache["data"]
     else:
         try:
-            import glob
             from map_vector import build
-            from stored_map import render_latest, STORE
-            files = sorted(glob.glob(os.path.join(STORE, "*_robot_map.bin")))
-            if not files:
-                render_latest()
-                files = sorted(glob.glob(os.path.join(STORE, "*_robot_map.bin")))
-            if not files:
+            from stored_map import current_map_bytes
+            rb, floor = current_map_bytes()
+            if not rb:
                 return jsonify({"ok": False, "error": "no stored map yet"}), 404
             import room_overrides
-            with open(files[-1], "rb") as f:
-                data = build(f.read(), splits=room_overrides.get_splits())
+            data = build(rb, splits=room_overrides.get_splits())
+            data["floor"] = floor["name"]
+            data["floor_id"] = floor["id"]
             _vec_cache.update(ts=time.time(), data=data)
         except Exception as e:
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
@@ -290,7 +287,8 @@ def api_map_vector():
             from stored_map import latest_route
             _route_cache.update(ts=time.time(), data=latest_route())
         r = _route_cache["data"] or {}
-        if r.get("points"):
+        # the last run may have been on another floor
+        if r.get("points") and r.get("map_id", out.get("map_id")) == out.get("map_id"):
             out["path"] = r["points"]
             out["robot_px"] = r["last"]
             out["route_info"] = {"points": r.get("count"), "at": r.get("at"),
@@ -306,6 +304,35 @@ def api_map_vector():
     except Exception:
         pass
     return jsonify(out)
+
+
+@app.get("/api/floors")
+def api_floors():
+    """Stored maps, one per floor, and which one the map views show."""
+    try:
+        from stored_map import floors, selected_floor
+        fl = floors()
+        sel = selected_floor()
+        if sel not in {f["id"] for f in fl}:
+            sel = max(fl, key=lambda f: f.get("time") or 0)["id"] if fl else None
+        return jsonify({"ok": True, "floors": fl, "selected": sel})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/floors/select")
+def api_floors_select():
+    """Choose which floor's map to show. Only changes our view, not the robot."""
+    try:
+        from stored_map import select_floor
+        select_floor((request.json or {})["id"])
+        _vec_cache.update(ts=0, data=None)
+        _map_cache.update(ts=0)
+        import map_render
+        map_render._cache.update(ts=0.0, png=None)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.post("/api/rooms/clean")

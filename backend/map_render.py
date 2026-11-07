@@ -20,6 +20,7 @@ WALL = (9, 14, 26)
 PATH = (255, 255, 255)
 DOCK = (34, 197, 94)
 ROBOT = (56, 189, 248)
+NOGO = (239, 68, 68)
 FONT_PATH = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 
 _cache = {"ts": 0.0, "png": None}
@@ -29,17 +30,18 @@ def _vec():
     """Assemble the full vector map (rooms + overrides + route), like the API."""
     import sys
     sys.path.insert(0, HERE)
-    from stored_map import STORE, latest_route
+    from stored_map import current_map_bytes, latest_route
     from map_vector import build
     import room_overrides
-    files = sorted(glob.glob(os.path.join(STORE, "*_robot_map.bin")))
-    if not files:
+    rb, floor = current_map_bytes()
+    if not rb:
         return None
-    with open(files[-1], "rb") as f:
-        vec = build(f.read(), splits=room_overrides.get_splits())
+    vec = build(rb, splits=room_overrides.get_splits())
+    vec["floor"] = floor["name"]
     try:
         r = latest_route() or {}
-        if r.get("points"):
+        # the last run may have been on another floor
+        if r.get("points") and r.get("map_id", vec["map_id"]) == vec["map_id"]:
             vec["path"] = r["points"]
             vec["robot_px"] = r["last"]
     except Exception:
@@ -87,6 +89,15 @@ def render_png(force: bool = False) -> bytes | None:
     for (x, y) in vec.get("walls", []):
         px, py = x * scale + pad, y * scale + pad
         d.rectangle([px, py, px + ws, py + ws], fill=(*WALL, 235))
+
+    # no-go zones (hatched red) and virtual walls (red lines)
+    for z in vec.get("no_go_zones", []):
+        poly = [tx(p) for p in z["px"]]
+        if len(poly) >= 3:
+            d.polygon(poly, fill=(*NOGO, 60), outline=(*NOGO, 220))
+    for wall in vec.get("virtual_walls", []):
+        x1, y1, x2, y2 = wall["px"]
+        d.line([tx((x1, y1)), tx((x2, y2))], fill=(*NOGO, 235), width=max(2, int(0.8 * scale)))
 
     # cleaning path
     path = vec.get("path")

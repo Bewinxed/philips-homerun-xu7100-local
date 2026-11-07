@@ -48,7 +48,8 @@
       "total_time": { "name": "Lifetime runtime" }
     },
     "select": {
-      "water": { "name": "Water flow" }
+      "water": { "name": "Water flow" },
+      "floor": { "name": "Map floor" }
     },
     "number": {
       "volume": { "name": "Volume" }

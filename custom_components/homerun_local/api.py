@@ -86,6 +86,22 @@ class HomeRunApiClient:
         """POST /api/mapping — start a fresh mapping run."""
         await self._post("/api/mapping", {})
 
+    async def async_get_floors(self) -> dict[str, Any]:
+        """GET /api/floors — stored maps (one per floor) and the selected one."""
+        url = f"{self.base_url}/api/floors"
+        try:
+            async with asyncio.timeout(20):
+                async with self._session.get(url) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise HomeRunApiError(f"Error fetching floors from {url}: {err}") from err
+        return data if isinstance(data, dict) else {}
+
+    async def async_select_floor(self, floor_id: int) -> None:
+        """POST /api/floors/select — which floor's map the camera shows."""
+        await self._post("/api/floors/select", {"id": floor_id})
+
     async def async_get_map_png(self) -> bytes | None:
         """Fetch the latest map PNG, or None when the backend returns 404."""
         url = f"{self.base_url}/api/map"

@@ -150,6 +150,14 @@ class HomerunMapCard extends HTMLElement {
       const wp = vec.walls.map(([x, y]) => `M${x} ${y}h1v1h-1z`).join('');
       s += `<path d="${wp}" fill="#0b1220" fill-opacity="0.9"/>`;
     }
+    // robot-side no-go zones + virtual walls (non-interactive)
+    for (const z of vec.no_go_zones || []) {
+      s += `<path d="${this._ring(z.px)}" fill="#ef4444" fill-opacity="0.22" stroke="#ef4444" stroke-width="0.5" style="pointer-events:none"/>`;
+    }
+    for (const w of vec.virtual_walls || []) {
+      const [x1, y1, x2, y2] = w.px;
+      s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#ef4444" stroke-width="1" stroke-linecap="round" style="pointer-events:none"/>`;
+    }
     // last path
     if (vec.path && vec.path.length > 1) {
       s += `<path d="M${vec.path.map((p) => `${p[0]} ${p[1]}`).join('L')}" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="0.6"/>`;

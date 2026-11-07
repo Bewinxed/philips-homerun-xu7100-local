@@ -19,9 +19,20 @@ ROOT = os.path.dirname(HERE)
 FILE = os.path.join(ROOT, "maps", "room_overrides.json")
 
 
+def _file() -> str:
+    """Room ids restart on every floor of a multi-floor robot, so once a floor
+    has been chosen its edits live in their own file."""
+    try:
+        from stored_map import selected_floor
+        fid = selected_floor()
+    except Exception:
+        fid = None
+    return FILE if fid is None else os.path.join(ROOT, "maps", f"room_overrides_{fid}.json")
+
+
 def _load() -> dict:
     try:
-        with open(FILE) as f:
+        with open(_file()) as f:
             d = json.load(f)
     except Exception:
         d = {}
@@ -32,11 +43,12 @@ def _load() -> dict:
 
 
 def _save(d: dict):
-    os.makedirs(os.path.dirname(FILE), exist_ok=True)
-    tmp = FILE + ".tmp"
+    path = _file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(d, f, indent=2)
-    os.replace(tmp, FILE)
+    os.replace(tmp, path)
 
 
 def _root_map(groups: list[list[int]]) -> dict[int, int]:
