@@ -12,6 +12,12 @@ Built and verified on the **Philips HomeRun XU7100** (ODM name "Dustin 7100", fi
 
 The rest of the Philips HomeRun line (for example the XU3000, XU5000, and XU9000 series) and other Tuya-based laser vacuums share the same protocol family, so most of this is likely to apply with some datapoint adjustments. The exact datapoint numbers and command frames were read from one specific robot, so treat them as a strong starting point rather than a guarantee for another model. Use `./homerun learn` and `./homerun sniff` to confirm the datapoints on your unit before writing to them.
 
+### Other models
+
+The DP map is per model. `./homerun key` (or `./homerun learn model`) pulls your robot's own cloud thing model and writes `backend/models/<product_id>.json`, which then replaces the XU7100 defaults: DP numbers, suction and water levels, consumable lifetimes and fault labels all come from your device. The web UI and Home Assistant only offer what that model actually has (for example no empty-bin button without an auto-empty dock). Without a model file, the hand-verified XU7100 schema in `backend/dp_schema.json` is used. If a model file works on your robot, consider contributing it.
+
+Room-clean, zone and goto frames (`command_trans`) are shared across the Tuya laser family but have only been verified on the XU7100.
+
 ## Why this exists
 
 The robot stopped returning to its dock and got stuck on an old map. A factory reset did not help, and there was no local repair option. This project came out of reverse-engineering how it talks on the network, so it can run entirely from the LAN instead of being replaced.

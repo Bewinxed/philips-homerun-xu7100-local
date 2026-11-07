@@ -62,4 +62,12 @@ if specs.get("success"):
 else:
     print("     note: could not pull DP spec:", specs.get("msg"))
 
-print("\nNext: .venv/bin/python tools/learn_dps.py   then start the server.")
+# Per-model DP schema, so models other than the XU7100 get their own DP map
+try:
+    sys.path.insert(0, HERE)
+    import learn_dps
+    learn_dps.learn_model()
+except SystemExit as e:
+    print("     note: could not build model schema:", e)
+
+print("\nNext: start the server (./homerun start).")

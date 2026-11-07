@@ -134,6 +134,13 @@ SENSORS: tuple[HomeRunSensorDescription, ...] = (
 )
 
 
+# sensor key -> consumable name in /api/diagnostics
+_CONSUMABLE_KEYS = {
+    "side_brush": "Side brush", "main_brush": "Main brush",
+    "filter": "Filter", "mop_cloth": "Mop cloth",
+}
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: HomeRunConfigEntry,
@@ -141,8 +148,15 @@ async def async_setup_entry(
 ) -> None:
     """Set up the HomeRun sensors."""
     coordinator = entry.runtime_data
+    diag = coordinator.diagnostics
+    present = {c.get("name") for c in diag.get("consumables", [])}
     async_add_entities(
-        HomeRunSensor(coordinator, entry, description) for description in SENSORS
+        HomeRunSensor(coordinator, entry, description)
+        for description in SENSORS
+        # skip consumables this model doesn't track (e.g. no mop on some units)
+        if "capabilities" not in diag
+        or description.key not in _CONSUMABLE_KEYS
+        or _CONSUMABLE_KEYS[description.key] in present
     )
 
 

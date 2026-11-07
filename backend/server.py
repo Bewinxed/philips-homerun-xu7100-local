@@ -2,6 +2,7 @@
 
 Endpoints:
   GET  /api/state          -> current semantic state (json)
+  GET  /api/capabilities   -> what this model supports (fan/water levels, features)
   GET  /api/events         -> SSE stream, pushes state on change
   POST /api/command        -> {"action": "start|pause|stop|home|locate"}
   POST /api/fan            -> {"level": "..."}
@@ -83,6 +84,11 @@ def api_diagnostics():
         return jsonify(controller.diagnostics())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/capabilities")
+def api_capabilities():
+    return jsonify(controller.capabilities())
 
 
 @app.get("/api/events")
@@ -198,9 +204,12 @@ def api_language():
 
 @app.post("/api/empty")
 def api_empty():
-    """DP 38 dust_collection_switch — tell the base to empty the bin."""
-    controller.set_dp("38", True)
-    return jsonify({"ok": True})
+    """dust_collection_switch — tell the base to empty the bin."""
+    try:
+        controller.empty_bin()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.post("/api/dp")

@@ -10,7 +10,8 @@ CONF_PORT = "port"
 CONF_FAN_SPEEDS = "fan_speeds"
 
 DEFAULT_PORT = 8787
-DEFAULT_FAN_SPEEDS = ["quiet", "normal", "strong", "max"]
+# Only used when the backend doesn't report the model's own suction levels
+DEFAULT_FAN_SPEEDS = ["gentle", "normal", "strong", "max"]
 
 # How often the coordinator polls GET /api/state
 UPDATE_INTERVAL_SECONDS = 5
@@ -19,7 +20,8 @@ UPDATE_INTERVAL_SECONDS = 5
 PLATFORMS = ["vacuum", "sensor", "select", "switch", "number", "button", "camera"]
 
 MANUFACTURER = "Philips"
-MODEL = "HomeRun XU7100"
+MODEL = "HomeRun"
 
-# Water tank levels (backend enum -> friendly label)
+# Water tank levels (backend enum -> friendly label); levels the model reports
+# that aren't listed here are shown title-cased
 WATER_LEVELS = {"closed": "Off", "low": "Low", "middle": "Medium", "high": "High"}

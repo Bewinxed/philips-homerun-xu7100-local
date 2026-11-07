@@ -2,7 +2,7 @@
 # homerun — one entrypoint for the whole local stack.
 #   homerun start     start the control server (web UI + API) on :8787
 #   homerun key       pull local_key from the cloud (after app account is linked)
-#   homerun learn     learn this robot's real DP schema (needs key)
+#   homerun learn     learn this robot's DP schema: learn model|spec|live
 #   homerun map       test cloud map fetch/render
 #   homerun cloud     verify Tuya cloud credentials
 #   homerun build     rebuild the Svelte frontend into web/dist

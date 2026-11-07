@@ -118,6 +118,10 @@ class TuyaCloud:
     def device_specs(self, device_id):
         return self.get(f"/v1.0/devices/{device_id}/specifications")
 
+    def thing_model(self, device_id):
+        """Full DP model: dp ids, codes, access modes, enum ranges, bitmap labels."""
+        return self.get(f"/v2.0/cloud/thing/{device_id}/model")
+
 
 if __name__ == "__main__":
     import sys

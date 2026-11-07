@@ -1,12 +1,13 @@
-"""Semantic control layer for the Philips HomeRun XU7100 (Tuya category 'sd').
+"""Semantic control layer for Philips HomeRun robots (Tuya category 'sd').
 
 Two interchangeable backends behind one interface:
   * TuyaBackend  - real robot over the LAN (tinytuya, no cloud needed for control)
   * SimBackend   - in-memory state machine, so the whole UI/HA stack is testable
                    before the local_key exists.
 
-The semantic <-> DP mapping lives in dp_schema.json and is refined by
-tools/learn_dps.py once we can actually poll the robot.
+The semantic <-> DP mapping is per model: backend/models/<product_id>.json,
+generated from the robot's cloud thing model by tools/learn_dps.py, with the
+hand-verified XU7100 schema (dp_schema.json) as the fallback. See schema.py.
 """
 from __future__ import annotations
 import json, os, threading, time, copy
@@ -21,19 +22,23 @@ def _load_json(path, default=None):
     except FileNotFoundError:
         return default
 
-SCHEMA = _load_json(os.path.join(HERE, "dp_schema.json"), {})
+from schema import load as _load_schema
+SCHEMA, SCHEMA_SOURCE, MODEL = _load_schema()
 
 # Canonical states we normalise every backend into (mirrors HA vacuum states)
 IDLE, CLEANING, PAUSED, RETURNING, DOCKED, CHARGING, ERROR = \
     "idle", "cleaning", "paused", "returning", "docked", "charging", "error"
 
-FAN_LEVELS = ["quiet", "normal", "strong", "max"]
-WATER_LEVELS = ["low", "middle", "high", "closed"]
 
 
 def _schema_dp(name):
     e = SCHEMA.get(name)
     return e.get("dp") if isinstance(e, dict) else None
+
+
+def _schema_values(name):
+    e = SCHEMA.get(name)
+    return list(e.get("values") or []) if isinstance(e, dict) else []
 
 
 class BaseBackend:
@@ -64,12 +69,13 @@ class BaseBackend:
             "last_update": self._last_update,
         }
 
-    # Consumable life counters: value = minutes remaining, max from the Tuya DP spec.
+    # Consumable life counters: value = minutes remaining. The full life comes
+    # from the model's DP spec ("max"); these defaults are the XU7100's.
     CONSUMABLES = {
-        "17": ("Side brush", 9000),
-        "19": ("Main brush", 18000),
-        "21": ("Filter", 9000),
-        "23": ("Mop cloth", 9000),
+        "edge_brush_life": ("Side brush", 9000),
+        "roll_brush_life": ("Main brush", 18000),
+        "filter_life": ("Filter", 9000),
+        "rag_life": ("Mop cloth", 9000),
     }
     # Toggles worth surfacing in the UI (semantic name -> label)
     TOGGLES = {
@@ -78,8 +84,9 @@ class BaseBackend:
         "vibration": "Vibration mop", "customize_mode": "Custom mode",
         "dust_collect": "Auto-empty dock",
     }
-    # Fault bitmap — AUTHORITATIVE labels, pulled from this device's own Tuya
-    # DP specification (status 'fault', type Bitmap). Do not guess these.
+    # Fault bitmap — AUTHORITATIVE labels, pulled from the XU7100's own Tuya
+    # DP specification (status 'fault', type Bitmap). Do not guess these. A
+    # model schema with its own bitmap labels overrides this list.
     FAULT_BITS = [
         "lidar_shelter", "wheel_up", "low_battery", "dust_water", "ground_start",
         "cliff_ir", "co_sensor", "go_dock", "navigation", "escape", "wait_charge",
@@ -102,12 +109,29 @@ class BaseBackend:
         "escape": "trapped, could not escape",
     }
 
+    def capabilities(self) -> dict:
+        """What this model supports, so the UI and HA only offer real controls."""
+        return {
+            "model": MODEL,
+            "schema": SCHEMA_SOURCE,
+            "fan_levels": _schema_values("fan"),
+            "water_levels": _schema_values("water"),
+            "modes": _schema_values("mode"),
+            "features": sorted(n for n, e in SCHEMA.items()
+                               if isinstance(e, dict) and e.get("dp")),
+        }
+
     def diagnostics(self) -> dict:
         """Everything the robot actually exposes about its own health."""
         raw = self.raw()
-        d = {"consumables": [], "faults": [], "totals": {}, "device": {}, "components": {}}
+        d = {"consumables": [], "faults": [], "totals": {}, "device": {}, "components": {},
+             "capabilities": self.capabilities()}
 
-        for dp, (name, full) in self.CONSUMABLES.items():
+        for sem, (name, full) in self.CONSUMABLES.items():
+            dp = _schema_dp(sem)
+            if not dp:
+                continue
+            full = SCHEMA[sem].get("max") or full
             v = raw.get(dp)
             if isinstance(v, (int, float)):
                 d["consumables"].append({
@@ -116,22 +140,25 @@ class BaseBackend:
                     "hours_left": round(v / 60.0, 1),
                 })
 
-        f = raw.get("28")
+        f = self._get(raw, "fault")
         if isinstance(f, int):
             d["fault_code"] = f
-            names = [n for i, n in enumerate(self.FAULT_BITS) if f & (1 << i)]
+            bits = (SCHEMA.get("fault") or {}).get("labels") or self.FAULT_BITS
+            names = [n for i, n in enumerate(bits) if f & (1 << i)]
             d["faults"] = names
             d["fault_detail"] = [
                 {"name": n, "hint": self.FAULT_HINTS.get(n, "")} for n in names
             ]
 
-        for dp, key, unit in (("29", "total_area", "m2"), ("30", "total_cleans", "runs"),
-                              ("31", "total_time", "min")):
-            if dp in raw:
+        for sem, key, unit in (("total_area", "total_area", "m2"),
+                               ("total_count", "total_cleans", "runs"),
+                               ("total_time", "total_time", "min")):
+            dp = _schema_dp(sem)
+            if dp and dp in raw:
                 d["totals"][key] = {"value": raw[dp], "unit": unit}
 
-        # device_info blob (wifi/rssi/ip/mac/firmware) arrives on DP 34 as base64 JSON
-        info = raw.get("34")
+        # device_info blob (wifi/rssi/ip/mac/firmware) arrives as base64 JSON
+        info = self._get(raw, "device_info")
         if isinstance(info, str):
             try:
                 import base64 as _b64
@@ -139,9 +166,11 @@ class BaseBackend:
             except Exception:
                 pass
 
-        for dp, label in (("40", "mop"), ("41", "work mode"), ("106", "clean type"),
-                          ("9", "suction"), ("10", "water"), ("103", "remote mode")):
-            if dp in raw:
+        for sem, label in (("mop_state", "mop"), ("work_mode", "work mode"),
+                           ("no_mop_zones", "clean type"), ("fan", "suction"),
+                           ("water", "water"), ("remote_mode", "remote mode")):
+            dp = _schema_dp(sem)
+            if dp and dp in raw:
                 d["components"][label] = raw[dp]
 
         d["toggles"] = {}
@@ -216,6 +245,13 @@ class BaseBackend:
         self._write(str(dp), value)
 
     # ---- extended controls (all datapoints verified via cloud shadow) --------
+    def empty_bin(self):
+        """dust_collection_switch — tell the auto-empty base to empty the bin."""
+        dp = _schema_dp("dust_collect")
+        if not dp:
+            raise ValueError("this model has no auto-empty dock")
+        self._write(dp, True)
+
     def start_mapping(self):
         """DP 104 create_map — build a fresh map without cleaning."""
         dp = _schema_dp("create_map")

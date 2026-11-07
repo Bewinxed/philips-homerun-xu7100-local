@@ -21,7 +21,8 @@ class HomeRunEntity(CoordinatorEntity[HomeRunCoordinator]):
             identifiers={(DOMAIN, entry.entry_id)},
             name="Philips HomeRun",
             manufacturer=MANUFACTURER,
-            model=MODEL,
+            model=(coordinator.diagnostics.get("capabilities") or {}).get("model")
+            or MODEL,
             configuration_url=coordinator.client.base_url,
         )
 
