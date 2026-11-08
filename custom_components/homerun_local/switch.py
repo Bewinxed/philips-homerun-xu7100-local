@@ -18,6 +18,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import HomeRunConfigEntry, HomeRunCoordinator
 from .api import HomeRunApiError
 from .entity import HomeRunEntity
+from .schedule import HomeRunScheduleEntity, setup_schedule_platform
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +35,26 @@ async def async_setup_entry(
         HomeRunToggle(coordinator, entry, name, meta.get("label", name))
         for name, meta in toggles.items()
     )
+    setup_schedule_platform(hass, entry, async_add_entities, HomeRunScheduleSwitch)
+
+
+class HomeRunScheduleSwitch(HomeRunScheduleEntity, SwitchEntity):
+    """Turns a cleaning schedule on or off."""
+
+    _key = "enabled"
+    _attr_translation_key = "schedule"
+    _attr_icon = "mdi:calendar-clock"
+
+    @property
+    def is_on(self) -> bool | None:
+        s = self.schedule
+        return bool(s["enabled"]) if s else None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._edit(enabled=True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._edit(enabled=False)
 
 
 class HomeRunToggle(HomeRunEntity, SwitchEntity):

@@ -1,0 +1,60 @@
+add_schedule:
+  fields:
+    time:
+      required: true
+      example: "09:00"
+      selector:
+        time:
+    days:
+      example: ["mon", "wed", "fri"]
+      selector:
+        select:
+          multiple: true
+          options: [mon, tue, wed, thu, fri, sat, sun]
+          translation_key: day
+    enabled:
+      default: true
+      selector:
+        boolean:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: homerun_local
+set_schedule:
+  fields:
+    schedule:
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 8
+    time:
+      selector:
+        time:
+    days:
+      selector:
+        select:
+          multiple: true
+          options: [mon, tue, wed, thu, fri, sat, sun]
+          translation_key: day
+    enabled:
+      selector:
+        boolean:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: homerun_local
+delete_schedule:
+  fields:
+    schedule:
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 8
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: homerun_local

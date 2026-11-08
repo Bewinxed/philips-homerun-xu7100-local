@@ -15,14 +15,16 @@
 	import RobotAvatar from '$lib/RobotAvatar.svelte';
 	import VoiceStudio from '$lib/VoiceStudio.svelte';
 	import CareTab from '$lib/panels/CareTab.svelte';
+	import ScheduleTab from '$lib/panels/ScheduleTab.svelte';
 	import {
 		Play, Pause, Square, House, Radar, RotateCw, Wifi, WifiOff, Wind, Droplets,
-		Sparkles, Wrench, Wand2, Pencil, Check
+		Sparkles, Wrench, Wand2, Pencil, Check, CalendarClock
 	} from '@lucide/svelte';
 
-	type Tab = 'home' | 'care' | 'voice';
+	type Tab = 'home' | 'schedule' | 'care' | 'voice';
 	const TABS: { id: Tab; label: string; icon: any }[] = [
 		{ id: 'home', label: 'Home', icon: House },
+		{ id: 'schedule', label: 'Schedule', icon: CalendarClock },
 		{ id: 'care', label: 'Care', icon: Wrench },
 		{ id: 'voice', label: 'Voice', icon: Wand2 }
 	];
@@ -361,6 +363,8 @@
 						</div>
 					{/if}
 				</section>
+			{:else if tab === 'schedule'}
+				<div class="mt-6"><ScheduleTab /></div>
 			{:else if tab === 'care'}
 				<div class="mt-6">
 					<CareTab {diag} onToggle={doToggle} onEmpty={doEmpty} onMap={doMap} onDrive={doDrive} onVolume={doVolume} onLocate={() => cmd('locate')} />

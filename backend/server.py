@@ -102,9 +102,99 @@ def api_state():
 @app.get("/api/diagnostics")
 def api_diagnostics():
     try:
-        return jsonify(controller.diagnostics())
+        d = controller.diagnostics()
+        if "device_timer" in d.get("capabilities", {}).get("features", []):
+            d["schedules"] = _public_schedules()
+        return jsonify(d)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ---- cleaning schedules (DP 32, schedule.py) -----------------------------------
+def _public_schedules():
+    """The schedules without the robot's raw room/settings bytes."""
+    out = []
+    for i, s in enumerate(controller.schedules().get("schedules") or []):
+        out.append({"index": i, "enabled": s["enabled"], "days": s["days"], "time": s["time"],
+                    "whole_floor": s["whole_floor"], "other_map": s["status"] == 2,
+                    "rooms": [r["id"] for r in s.get("rooms", [])]})
+    return out
+
+
+def _change_schedules(change):
+    """Apply change(list) to the robot's current schedules and write them back."""
+    import copy
+    cur = copy.deepcopy(controller.schedules(max_age=120).get("schedules") or [])
+    new = change(cur)
+    if not controller.set_schedules(new):
+        return jsonify({"ok": False, "error": "the robot did not confirm the schedules"}), 502
+    return jsonify({"ok": True, "schedules": _public_schedules()})
+
+
+def _edit_fields(s, b):
+    import schedule
+    if "enabled" in b:
+        s["enabled"] = bool(b["enabled"])
+    if "days" in b:
+        days = b["days"].split(",") if isinstance(b["days"], str) else b["days"]
+        schedule.list_to_days([d for d in days if str(d).strip()])   # validates
+        s["days"] = [str(d).strip()[:3].lower() for d in days if str(d).strip()]
+    if "time" in b:
+        hh, mm = (int(x) for x in str(b["time"]).split(":")[:2])
+        s["time"] = f"{hh:02d}:{mm:02d}"
+    return s
+
+
+@app.get("/api/schedules")
+def api_schedules():
+    d = controller.schedules()
+    return jsonify({"ok": True, "max": d.get("max"), "schedules": _public_schedules()})
+
+
+@app.post("/api/schedules/<int:index>")
+def api_schedule_edit(index):
+    """body: any of {"enabled": bool, "days": ["mon", ...] | "mon,wed", "time": "HH:MM"}"""
+    b = request.json or {}
+
+    def change(cur):
+        if not 0 <= index < len(cur):
+            raise IndexError(f"no schedule {index}")
+        _edit_fields(cur[index], b)
+        return cur
+    try:
+        return _change_schedules(change)
+    except (IndexError, ValueError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.post("/api/schedules/add")
+def api_schedule_add():
+    """body: {"days": [...], "time": "HH:MM", "enabled": true} - cleans the whole
+    floor the robot is on, like a schedule made in the app."""
+    b = request.json or {}
+
+    def change(cur):
+        settings = next((s["settings"] for s in cur if s.get("whole_floor") and s.get("settings")), None)
+        s = _edit_fields({"enabled": True, "days": [], "time": "09:00", "whole_floor": True,
+                          "settings": settings}, b)
+        return cur + [s]
+    try:
+        return _change_schedules(change)
+    except (IndexError, ValueError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.delete("/api/schedules/<int:index>")
+@app.post("/api/schedules/<int:index>/delete")   # for clients limited to GET/POST
+def api_schedule_delete(index):
+    def change(cur):
+        if not 0 <= index < len(cur):
+            raise IndexError(f"no schedule {index}")
+        return cur[:index] + cur[index + 1:]
+    try:
+        return _change_schedules(change)
+    except (IndexError, ValueError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.get("/api/capabilities")

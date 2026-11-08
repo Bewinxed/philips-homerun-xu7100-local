@@ -158,3 +158,23 @@ The official pack:
 Building a ZIP with those exact filenames + audio format, served at a `.zip` URL,
 **activates correctly** — VERIFIED (robot spoke the custom clip on every prompt).
 Valid languageId range is ~8..30 on this model (42 was rejected outright).
+
+## Schedules — DP 32 `device_timer` (0xAB family, cmd 0x31 report / 0x30 set) — VERIFIED on an XU2000
+
+```
+ab 00000000 | len | cmd | data | chk      len = len(cmd + data), chk = sum(cmd + data) & 0xFF
+data = 0x01 (version)  0x08 (max)  count  schedule * count
+schedule = status days hour minute 0x00 type nRooms [room * nRooms | settings(11)]
+  status  1 = on, 0 = off, 2 = belongs to another map (the app shows it disabled)
+  days    bit 0 = Sunday ... bit 6 = Saturday
+  type    0 = whole floor the robot is on (nRooms 0, one settings block), 1 = rooms
+  room    id(1) + settings(11): passes, ?, order, ?, ?, suction, ?, FF FF FF FF
+```
+
+Writing cmd 0x30 with this layout (base64, like DP 15) replaces the schedules; the
+robot reports them back on DP 32 within a second or two. Verified: deleting
+schedules, switching one off and on, adding and deleting a whole-floor schedule.
+
+## Zones and walls — DP 15, cmd 0x39 / 0x49 report, 0x38 / 0x48 set — VERIFIED on an XU2000
+
+See backend/frames.py. The XU2000 only acts on base64 values; hex is ignored.

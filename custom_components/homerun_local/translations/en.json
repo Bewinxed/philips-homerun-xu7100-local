@@ -34,33 +34,163 @@
   },
   "entity": {
     "sensor": {
-      "battery": { "name": "Battery" },
-      "clean_area": { "name": "Cleaned area" },
-      "clean_time": { "name": "Cleaning time" },
-      "status": { "name": "Status" },
-      "fault": { "name": "Fault" },
-      "side_brush": { "name": "Side brush" },
-      "main_brush": { "name": "Main brush" },
-      "filter": { "name": "Filter" },
-      "mop_cloth": { "name": "Mop cloth" },
-      "total_area": { "name": "Lifetime area" },
-      "total_cleans": { "name": "Lifetime cleans" },
-      "total_time": { "name": "Lifetime runtime" }
+      "battery": {
+        "name": "Battery"
+      },
+      "clean_area": {
+        "name": "Cleaned area"
+      },
+      "clean_time": {
+        "name": "Cleaning time"
+      },
+      "status": {
+        "name": "Status"
+      },
+      "fault": {
+        "name": "Fault"
+      },
+      "side_brush": {
+        "name": "Side brush"
+      },
+      "main_brush": {
+        "name": "Main brush"
+      },
+      "filter": {
+        "name": "Filter"
+      },
+      "mop_cloth": {
+        "name": "Mop cloth"
+      },
+      "total_area": {
+        "name": "Lifetime area"
+      },
+      "total_cleans": {
+        "name": "Lifetime cleans"
+      },
+      "total_time": {
+        "name": "Lifetime runtime"
+      }
     },
     "select": {
-      "water": { "name": "Water flow" },
-      "floor": { "name": "Map floor" }
+      "water": {
+        "name": "Water flow"
+      },
+      "floor": {
+        "name": "Map floor"
+      }
     },
     "number": {
-      "volume": { "name": "Volume" }
+      "volume": {
+        "name": "Volume"
+      }
     },
     "button": {
-      "empty_bin": { "name": "Empty bin" },
-      "start_mapping": { "name": "Start mapping" },
-      "locate": { "name": "Locate" }
+      "empty_bin": {
+        "name": "Empty bin"
+      },
+      "start_mapping": {
+        "name": "Start mapping"
+      },
+      "locate": {
+        "name": "Locate"
+      }
     },
     "camera": {
-      "map": { "name": "Map" }
+      "map": {
+        "name": "Map"
+      }
+    },
+    "switch": {
+      "schedule": {
+        "name": "Schedule {number}"
+      }
+    },
+    "time": {
+      "schedule_time": {
+        "name": "Schedule {number} time"
+      }
+    },
+    "text": {
+      "schedule_days": {
+        "name": "Schedule {number} days"
+      }
+    }
+  },
+  "selector": {
+    "day": {
+      "options": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      }
+    }
+  },
+  "services": {
+    "add_schedule": {
+      "name": "Add schedule",
+      "description": "Add a cleaning schedule for the whole floor the robot is on.",
+      "fields": {
+        "time": {
+          "name": "Time",
+          "description": "Start time (HH:MM)."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days to clean on; none = once."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether the schedule is on."
+        },
+        "config_entry_id": {
+          "name": "Robot",
+          "description": "Only needed with more than one robot."
+        }
+      }
+    },
+    "set_schedule": {
+      "name": "Change schedule",
+      "description": "Change the time, days or on/off state of a schedule.",
+      "fields": {
+        "schedule": {
+          "name": "Schedule",
+          "description": "Schedule number, as in the entity names (1 = the first)."
+        },
+        "time": {
+          "name": "Time",
+          "description": "Start time (HH:MM)."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days to clean on; none = once."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether the schedule is on."
+        },
+        "config_entry_id": {
+          "name": "Robot",
+          "description": "Only needed with more than one robot."
+        }
+      }
+    },
+    "delete_schedule": {
+      "name": "Delete schedule",
+      "description": "Delete a cleaning schedule.",
+      "fields": {
+        "schedule": {
+          "name": "Schedule",
+          "description": "Schedule number, as in the entity names (1 = the first)."
+        },
+        "config_entry_id": {
+          "name": "Robot",
+          "description": "Only needed with more than one robot."
+        }
+      }
     }
   }
 }

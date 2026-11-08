@@ -69,6 +69,22 @@ export const gotoPoint = (x: number, y: number) => post('api/goto', { x, y });
 export const mapVector = (force = false) =>
 	fetch('api/map/vector' + (force ? '?force=1' : '')).then((r) => r.json());
 export type Floor = { id: number; name: string; time?: number };
+
+// cleaning schedules (DP 32); days are sun..sat, time HH:MM
+export type Schedule = {
+	index: number; enabled: boolean; days: string[]; time: string;
+	whole_floor: boolean; other_map: boolean; rooms: number[];
+};
+type ScheduleResult = { ok: boolean; error?: string; schedules?: Schedule[] };
+const postJson = (url: string, b: unknown) =>
+	fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) })
+		.then((r) => r.json());
+export const schedules = {
+	list: () => fetch('api/schedules').then((r) => r.json() as Promise<{ ok: boolean; max: number; schedules: Schedule[] }>),
+	edit: (i: number, patch: Partial<Schedule>) => postJson(`api/schedules/${i}`, patch) as Promise<ScheduleResult>,
+	add: (s: { time: string; days: string[]; enabled: boolean }) => postJson('api/schedules/add', s) as Promise<ScheduleResult>,
+	remove: (i: number) => postJson(`api/schedules/${i}/delete`, {}) as Promise<ScheduleResult>
+};
 export const floors = () =>
 	fetch('api/floors').then((r) => r.json() as Promise<{ ok: boolean; floors: Floor[]; selected: number | null; active: number | null }>);
 export const selectFloor = (id: number) => post('api/floors/select', { id });

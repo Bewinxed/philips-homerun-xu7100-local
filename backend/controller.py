@@ -31,6 +31,13 @@ IDLE, CLEANING, PAUSED, RETURNING, DOCKED, CHARGING, ERROR = \
 
 
 
+def _same_schedules(a, b):
+    """Same schedules, ignoring the derived 'enabled' flag."""
+    def norm(lst):
+        return [{k: v for k, v in s.items() if k != "enabled"} for s in lst]
+    return norm(a) == norm(b)
+
+
 def _schema_dp(name):
     e = SCHEMA.get(name)
     return e.get("dp") if isinstance(e, dict) else None
@@ -53,11 +60,14 @@ class BaseBackend:
         # last zones / walls the robot reported on DP 15 (frames.overlays shape)
         self._overlays = {"zones": None, "walls": None, "ts": 0.0}
         self._raw_b64 = None    # True when the robot reports raw DPs as base64
+        # cleaning schedules from DP 32 (schedule.decode shape)
+        self._schedules = {"max": 8, "schedules": None, "ts": 0.0}
 
     def _note_raw(self, raw):
-        """Pick the zones/walls echoes out of DP 15 as they arrive."""
+        """Pick the zones/walls echoes out of DP 15 and the schedules out of DP 32."""
         import base64
         import frames
+        self._note_schedules(raw.get(str(_schema_dp("device_timer"))))
         dp = _schema_dp("command_trans")
         val = raw.get(str(dp)) if dp else None
         buf = frames.decode_raw(val)
@@ -74,6 +84,77 @@ class BaseBackend:
                 if ov[k] is not None:
                     self._overlays[k] = ov[k]
                     self._overlays["ts"] = time.time()
+
+    def _note_schedules(self, val, ts=None):
+        import base64
+        import schedule
+        if not isinstance(val, str) or not val:
+            return False
+        try:
+            fr = schedule.parse_frame(base64.b64decode(val))
+        except Exception:
+            return False
+        if not fr or fr[0] not in (schedule.REPORT, schedule.SET):
+            return False
+        d = schedule.decode(fr[1])
+        with self._lock:
+            self._schedules = {**d, "ts": ts or time.time()}
+        return True
+
+    def schedules(self, max_age=600) -> dict:
+        """The robot's cleaning schedules; from its last cloud report when ours
+        are older than max_age (it reports DP 32 rarely, e.g. after app edits)."""
+        with self._lock:
+            cur = dict(self._schedules)
+        if time.time() - cur["ts"] >= max_age:
+            p = self._cloud_dp("device_timer", 0)
+            if not (p and self._note_schedules(p["value"], time.time())):
+                with self._lock:
+                    self._schedules["ts"] = time.time()   # retry in max_age
+            with self._lock:
+                cur = dict(self._schedules)
+        return cur
+
+    def set_schedules(self, schedules, timeout=12.0) -> bool:
+        """Replace the robot's schedules and wait until it reports them back."""
+        import base64
+        import schedule
+        dp = _schema_dp("device_timer")
+        if not dp:
+            raise ValueError("this model has no schedules")
+        data = schedule.encode(schedules, self._schedules.get("max") or 8)
+        want = schedule.decode(data)["schedules"]
+        before = self._schedules["ts"]
+        sent = time.time()
+        self._write(dp, base64.b64encode(schedule.build(schedule.SET, data)).decode())
+        end = sent + timeout
+        while time.time() < end:
+            time.sleep(0.5)
+            with self._lock:
+                cur = dict(self._schedules)
+            if cur["ts"] <= before and time.time() - sent > 3:
+                time.sleep(1.5)
+                p = self._cloud_dp("device_timer", sent)
+                if p:
+                    self._note_schedules(p["value"], p["time"])
+                with self._lock:
+                    cur = dict(self._schedules)
+            if cur["ts"] > before:
+                return _same_schedules(cur["schedules"] or [], want)
+        return False
+
+    def _cloud_dp(self, code, since):
+        """{'value', 'time'} of a DP's last cloud report, if newer than `since`."""
+        try:
+            from tuya_cloud import TuyaCloud, load_cfg
+            cfg = load_cfg()
+            r = TuyaCloud(cfg).get(f"/v2.0/cloud/thing/{cfg['device_id']}/shadow/properties?codes={code}")
+            p = (r.get("result") or {}).get("properties", [{}])[0]
+        except Exception:
+            return None
+        if not p.get("time") or p["time"] / 1000 < since - 1:
+            return None
+        return {"value": p.get("value"), "time": p["time"] / 1000}
 
     def live_overlays(self) -> dict:
         with self._lock:
@@ -405,19 +486,11 @@ class BaseBackend:
     def _cloud_overlays(self, since):
         """The robot's last DP 15 report from the cloud, if it is newer than `since`."""
         import frames
-        try:
-            from tuya_cloud import TuyaCloud, load_cfg
-            cfg = load_cfg()
-            r = TuyaCloud(cfg).get(f"/v2.0/cloud/thing/{cfg['device_id']}/shadow/properties?codes=command_trans")
-            p = (r.get("result") or {}).get("properties", [{}])[0]
-        except Exception:
-            return None
-        if not p.get("time") or p["time"] / 1000 < since - 1:
-            return None
-        buf = frames.decode_raw(p.get("value"))
+        p = self._cloud_dp("command_trans", since)
+        buf = frames.decode_raw(p.get("value")) if p else None
         if buf is None:
             return None
-        return {**frames.overlays(buf), "ts": p["time"] / 1000}
+        return {**frames.overlays(buf), "ts": p["time"]}
 
     def resume(self):
         """Carry on with the interrupted job (unlike start(), which begins a new one)."""

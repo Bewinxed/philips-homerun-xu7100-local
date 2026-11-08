@@ -86,6 +86,18 @@ class HomeRunApiClient:
         """POST /api/mapping — start a fresh mapping run."""
         await self._post("/api/mapping", {})
 
+    # Writing schedules waits for the robot to confirm them (up to ~15 s)
+    async def async_edit_schedule(self, index: int, patch: dict[str, Any]) -> None:
+        """POST /api/schedules/<index> with any of enabled, days, time."""
+        await self._post(f"/api/schedules/{int(index)}", patch, timeout=30)
+
+    async def async_add_schedule(self, data: dict[str, Any]) -> None:
+        """POST /api/schedules/add — a whole-floor schedule."""
+        await self._post("/api/schedules/add", data, timeout=30)
+
+    async def async_delete_schedule(self, index: int) -> None:
+        await self._post(f"/api/schedules/{int(index)}/delete", {}, timeout=30)
+
     async def async_get_floors(self) -> dict[str, Any]:
         """GET /api/floors — stored maps (one per floor) and the selected one."""
         url = f"{self.base_url}/api/floors"
@@ -115,12 +127,17 @@ class HomeRunApiClient:
         except (aiohttp.ClientError, TimeoutError) as err:
             raise HomeRunApiError(f"Error fetching map from {url}: {err}") from err
 
-    async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    async def _post(self, path: str, body: dict[str, Any], timeout: float = 10) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         try:
-            async with asyncio.timeout(10):
+            async with asyncio.timeout(timeout):
                 async with self._session.post(url, json=body) as resp:
-                    resp.raise_for_status()
+                    if resp.status >= 400:
+                        try:
+                            msg = (await resp.json()).get("error")
+                        except (aiohttp.ContentTypeError, ValueError):
+                            msg = None
+                        raise HomeRunApiError(msg or f"HTTP {resp.status} from {url}")
                     try:
                         return await resp.json()
                     except aiohttp.ContentTypeError:

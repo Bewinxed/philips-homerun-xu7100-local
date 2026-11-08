@@ -17,7 +17,7 @@ DEFAULT_FAN_SPEEDS = ["gentle", "normal", "strong", "max"]
 UPDATE_INTERVAL_SECONDS = 5
 
 # Platforms forwarded from the config entry
-PLATFORMS = ["vacuum", "sensor", "select", "switch", "number", "button", "camera"]
+PLATFORMS = ["vacuum", "sensor", "select", "switch", "number", "button", "camera", "time", "text"]
 
 MANUFACTURER = "Philips"
 MODEL = "HomeRun"
