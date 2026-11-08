@@ -50,7 +50,7 @@ export type Diagnostics = {
 	components: Record<string, string>;
 	toggles?: Record<string, { label: string; on: boolean }>;
 	settings?: Record<string, number>;
-	capabilities?: { model?: string; name?: string; fan_levels?: string[]; water_levels?: string[] };
+	capabilities?: { model?: string; name?: string; fan_levels?: string[]; water_levels?: string[]; features?: string[] };
 };
 
 export const diagnostics = () => fetch('api/diagnostics').then((r) => r.json() as Promise<Diagnostics>);

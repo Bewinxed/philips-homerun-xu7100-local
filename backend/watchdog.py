@@ -99,6 +99,7 @@ class Watchdog(threading.Thread):
         self._run = None            # {"start", "floor", "clean_time", "incidents": [...]}
         self._prev = None
         self._cooldown = 0.0
+        self._handled = False       # the current stuck event was already dealt with
 
     # ---- public ---------------------------------------------------------
     def snapshot(self, floor=None) -> dict:
@@ -157,9 +158,12 @@ class Watchdog(threading.Thread):
         if self._run is not None:
             if isinstance(st.get("clean_time"), int):
                 self._run["clean_time"] = max(self._run["clean_time"], st["clean_time"])
-            if self._stuck(st) and time.time() > self._cooldown:
+            stuck = self._stuck(st)
+            if not stuck:
+                self._handled = False   # that event is over; a new one is a new incident
+            if stuck and not self._handled and time.time() > self._cooldown:
                 self._handle_stuck(st)
-            elif state in ("docked", "charging", "idle") and not self._stuck(st):
+            elif state in ("docked", "charging", "idle") and not stuck:
                 self._end_run()
         self._prev = state
 
@@ -178,20 +182,26 @@ class Watchdog(threading.Thread):
                "fault": st.get("fault"), "attempts": 0, "recovered": None, "px": None}
         self.status = "freeing"
         print(f"[watchdog] stuck (fault {inc['fault']}); trying to free it", flush=True)
+        self._handled = True
+        inc["outcome"] = "stuck"
         for k in range(int(self.cfg["attempts"])):
             inc["attempts"] = k + 1
             if self._free(k):
-                inc["recovered"] = True
+                inc["recovered"], inc["outcome"] = True, "freed"
                 break
             if self.c.state()["state"] in ("docked", "charging"):
-                break   # someone sent it home
+                # someone sent it home: not freed by us, but not stuck either
+                inc["recovered"], inc["outcome"] = True, "sent_home"
+                break
         else:
             inc["recovered"] = False
         self._run["incidents"].append(inc)
         with self._lock:
             self.data["incidents"].append(inc)
             _save(self.data)
-        if inc["recovered"]:
+        if inc["outcome"] == "sent_home":
+            self.status = "idle"
+        elif inc["recovered"]:
             self.status = "watching"
             self._cooldown = time.time() + 30
         else:
@@ -223,6 +233,7 @@ class Watchdog(threading.Thread):
     # ---- after a run ----------------------------------------------------
     def _end_run(self):
         run, self._run = self._run, None
+        run["end"] = time.time()
         self.status = "idle"
         if run["incidents"]:
             threading.Timer(self.cfg["route_delay_s"], self._locate, args=(run,)).start()
@@ -230,8 +241,11 @@ class Watchdog(threading.Thread):
     def _locate(self, run):
         from stored_map import latest_route
         r = latest_route()
-        if not r.get("points") or (r.get("at") or 0) < run["start"] - 60:
-            print(f"[watchdog] no cleaning record for the run ({r.get('error', 'too old')})", flush=True)
+        at = r.get("at") or 0
+        # the record must belong to this run: saved after it started and around
+        # when it ended, not by a later run
+        if not r.get("points") or not (run["start"] - 60 <= at <= run.get("end", time.time()) + 600):
+            print(f"[watchdog] no cleaning record for the run ({r.get('error', 'other run')})", flush=True)
             return
         pts = r["points"]
         total = max(run["clean_time"], 1)
@@ -248,12 +262,18 @@ class Watchdog(threading.Thread):
         self._patterns()
 
     def _patterns(self):
-        res = self._resolution_cm()
-        r_exact = self.cfg["radius_m"] * 100 / res
-        r_approx = r_exact * 1.6
+        with self._lock:
+            incidents = list(self.data["incidents"])
+        found = []
+        # metres -> pixels with each floor's own map resolution
+        for floor in {i.get("floor") for i in incidents if i.get("floor")}:
+            res = self._resolution_cm(floor)
+            r_exact = self.cfg["radius_m"] * 100 / res
+            on_floor = [i for i in incidents if i.get("floor") == floor]
+            found += [(c, res) for c in clusters(on_floor, r_exact, r_exact * 1.6)]
         with self._lock:
             new = []
-            for floor, cx, cy, w, ids in clusters(self.data["incidents"], r_exact, r_approx):
+            for (floor, cx, cy, w, ids), res in found:
                 if w < self.cfg["threshold"] or any(set(ids) & set(s["incidents"]) for s in self.data["suggestions"]):
                     continue
                 half = self.cfg["zone_m"] * 100 / res / 2
@@ -284,8 +304,15 @@ class Watchdog(threading.Thread):
                 return fl["id"]
         return None
 
-    def _resolution_cm(self):
-        return 5   # every HomeRun map seen so far; the header's value when a floor is known
+    def _resolution_cm(self, floor=None):
+        """cm per map pixel of a floor's stored map (5 on every HomeRun map seen so far)."""
+        try:
+            from stored_map import floors, floor_map_bytes, parse_header
+            fl = next((f for f in floors() if f["id"] == floor), None)
+            b = floor_map_bytes(fl) if fl else None
+            return (parse_header(b)["resolution_cm"] or 5) if b else 5
+        except Exception:
+            return 5
 
     # ---- writing a zone -------------------------------------------------
     def _apply(self, s):
@@ -306,7 +333,12 @@ class Watchdog(threading.Thread):
         fl = next((f for f in floors() if f["id"] == s["floor"]), None)
         hdr = parse_header(floor_map_bytes(fl))
         zone = {"mode": 0, "cmd": [px_to_cmd(hdr, x, y) for x, y in s["px"]]}
-        res = self.c.set_overlays(zones=list(live.get("zones") or []) + [zone])
+        current = list(live.get("zones") or [])
+        # a retry after a lost answer: the zone is already on the robot
+        if any(z.get("cmd") == zone["cmd"] for z in current):
+            s["status"], s["applied_ts"] = "applied", time.time()
+            return True, ""
+        res = self.c.set_overlays(zones=current + [zone])
         if not res.get("zones"):
             return False, "the robot did not confirm the zone"
         s["status"] = "applied"

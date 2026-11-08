@@ -68,21 +68,19 @@
 		await reloadVector(true);
 	}
 
-	const SUCTION = [
-		{ value: 'gentle', label: 'Gentle' }, { value: 'normal', label: 'Normal' },
-		{ value: 'strong', label: 'Strong' }, { value: 'max', label: 'Max' }
-	];
-	const WATER = [
-		{ value: 'closed', label: 'Off' }, { value: 'low', label: 'Low' },
-		{ value: 'middle', label: 'Medium' }, { value: 'high', label: 'High' }
-	];
+	// The model's own suction and water levels (capabilities), with these as labels
+	const LEVEL_LABEL: Record<string, string> = {
+		closed: 'Off', gentle: 'Gentle', quiet: 'Quiet', normal: 'Normal', standard: 'Normal',
+		strong: 'Strong', max: 'Max', turbo: 'Turbo', low: 'Low', middle: 'Medium', high: 'High'
+	};
+	const levels = (vals: string[] | undefined, fallback: string[]) =>
+		(vals?.length ? vals : fallback).map((v) => ({ value: v, label: LEVEL_LABEL[v] ?? v }));
+	const SUCTION = $derived(levels(diag?.capabilities?.fan_levels, ['gentle', 'normal', 'strong', 'max']));
+	const WATER = $derived(levels(diag?.capabilities?.water_levels, ['closed', 'low', 'middle', 'high']));
+	const features = $derived(new Set((diag?.capabilities as any)?.features ?? []));
 	function suctionValue(v: string | null | undefined) {
 		const k = (v ?? '').toLowerCase();
-		if (['gentle', 'quiet'].includes(k)) return 'gentle';
-		if (['normal', 'standard'].includes(k)) return 'normal';
-		if (k === 'strong') return 'strong';
-		if (['max', 'turbo'].includes(k)) return 'max';
-		return 'gentle';
+		return SUCTION.some((o) => o.value === k) ? k : SUCTION[0]?.value;
 	}
 
 	const stateLabel: Record<string, string> = {
@@ -324,7 +322,7 @@
 						</div>
 						<div>
 							<div class="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><Droplets class="size-4" /> Water</div>
-							<Segment options={WATER} value={s?.water ?? 'middle'} onchange={(v) => { api.water(v); }} />
+							<Segment options={WATER} value={s?.water ?? WATER[0]?.value} onchange={(v) => { api.water(v); }} />
 						</div>
 					</div>
 

@@ -120,6 +120,11 @@ def api_diagnostics():
         d = controller.diagnostics()
         if "device_timer" in d.get("capabilities", {}).get("features", []):
             d["schedules"] = _public_schedules()
+        try:   # cached cloud listing; lets the HA floor select follow changes
+            from stored_map import floors, current_floor_id
+            d["floors"] = {"floors": floors(), "selected": current_floor_id()}
+        except Exception:
+            pass
         return jsonify(d)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -388,8 +393,12 @@ _route_cache = {"ts": 0, "data": None}
 def api_map_vector():
     """Vector map: per-room outlines, labels, areas, settings, walls, charger."""
     force = request.args.get("force") == "1"
-    if not force and _vec_cache["data"] and time.time() - _vec_cache["ts"] < 120:
-        data = _vec_cache["data"]
+    from stored_map import current_floor_id
+    want = current_floor_id()
+    cached = _vec_cache["data"]
+    if (not force and cached and cached.get("floor_id") == want
+            and time.time() - _vec_cache["ts"] < 120):
+        data = cached
     else:
         try:
             from map_vector import build
@@ -401,7 +410,9 @@ def api_map_vector():
             data = build(rb, splits=room_overrides.get_splits())
             data["floor"] = floor["name"]
             data["floor_id"] = floor["id"]
-            _vec_cache.update(ts=time.time(), data=data)
+            # a floor switch during the build: don't cache the old floor's map
+            if current_floor_id() == floor["id"]:
+                _vec_cache.update(ts=time.time(), data=data)
         except Exception as e:
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
     out = dict(data)

@@ -134,10 +134,14 @@ SENSORS: tuple[HomeRunSensorDescription, ...] = (
 )
 
 
-# sensor key -> consumable name in /api/diagnostics
+# sensor key -> consumable name in /api/diagnostics, and the backend feature behind it
 _CONSUMABLE_KEYS = {
     "side_brush": "Side brush", "main_brush": "Main brush",
     "filter": "Filter", "mop_cloth": "Mop cloth",
+}
+_CONSUMABLE_FEATURES = {
+    "side_brush": "edge_brush_life", "main_brush": "roll_brush_life",
+    "filter": "filter_life", "mop_cloth": "rag_life",
 }
 
 
@@ -149,14 +153,15 @@ async def async_setup_entry(
     """Set up the HomeRun sensors."""
     coordinator = entry.runtime_data
     diag = coordinator.diagnostics
-    present = {c.get("name") for c in diag.get("consumables", [])}
+    # consumables the model has, from its capabilities: a value missing from the
+    # first poll must not drop the sensor for good
+    features = set((diag.get("capabilities") or {}).get("features") or [])
     async_add_entities(
         HomeRunSensor(coordinator, entry, description)
         for description in SENSORS
-        # skip consumables this model doesn't track (e.g. no mop on some units)
-        if "capabilities" not in diag
-        or description.key not in _CONSUMABLE_KEYS
-        or _CONSUMABLE_KEYS[description.key] in present
+        if not features
+        or description.key not in _CONSUMABLE_FEATURES
+        or _CONSUMABLE_FEATURES[description.key] in features
     )
 
 

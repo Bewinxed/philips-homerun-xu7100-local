@@ -49,8 +49,21 @@ def _store_path(map_id, key, stamp=None):
     return os.path.join(STORE, f"{map_id}_{stamp}_{key}.bin" if stamp else f"{map_id}_{key}.bin")
 
 
+_download_locks: dict = {}
+_download_locks_guard = __import__("threading").Lock()
+
+
 def download_map(map_id, stamp=None):
-    """Return {'app_map': bytes|None, 'robot_map': bytes|None} for a record id."""
+    """Return {'app_map': bytes|None, 'robot_map': bytes|None} for a record id.
+    Downloads of one record run one at a time, so an older one can't remove the
+    files of a newer one that finished first."""
+    with _download_locks_guard:
+        lock = _download_locks.setdefault(str(map_id), __import__("threading").Lock())
+    with lock:
+        return _download_map(map_id, stamp)
+
+
+def _download_map(map_id, stamp=None):
     c, did = _cloud()
     r = c.get(f"/v1.0/users/sweepers/file/{did}/download?id={map_id}")
     if not r.get("success"):
@@ -67,9 +80,11 @@ def download_map(map_id, stamp=None):
         with open(_store_path(map_id, key, stamp), "wb") as f:
             f.write(blob)
         out[key] = blob
-    if stamp:   # drop older copies of this record
+    if stamp:   # drop older copies of this record (never newer ones)
         for name in os.listdir(STORE):
-            if name.startswith(f"{map_id}_") and f"_{stamp}_" not in name:
+            parts = name.split("_")
+            if (name.startswith(f"{map_id}_") and len(parts) > 2 and parts[1].isdigit()
+                    and int(parts[1]) < int(stamp)):
                 try:
                     os.remove(os.path.join(STORE, name))
                 except OSError:
@@ -237,6 +252,15 @@ def select_floor(map_id):
         json.dump({"id": int(map_id)}, f)
 
 
+def current_floor_id():
+    """The floor the map views show: the selected one, else the newest upload."""
+    sel = selected_floor()
+    fl = floors()
+    if any(f["id"] == sel for f in fl):
+        return sel
+    return max(fl, key=lambda f: f.get("time") or 0)["id"] if fl else None
+
+
 def current_map_bytes():
     """robot_map bytes of the selected floor (newest upload if none chosen),
     downloading it if it isn't cached yet. Returns (bytes, floor) or (None, None)."""
@@ -272,7 +296,12 @@ def active_floor(live):
         b = floor_map_bytes(fl)
         if b and same_overlays(frames.overlays(split_robot_map(b)[1]), live):
             hits.append(fl)
-    return hits[0] if len(hits) == 1 else None
+    if len(hits) == 1:
+        return hits[0]
+    # Several floors look the same (e.g. none has zones or walls): prefer the
+    # floor that is shown, otherwise it can't be told which one the robot is on.
+    sel = current_floor_id() if hits else None
+    return next((f for f in hits if f["id"] == sel), None)
 
 
 def render_latest(save_png=True):

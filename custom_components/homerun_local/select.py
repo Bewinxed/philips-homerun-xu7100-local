@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.select import SelectEntity
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -34,14 +34,25 @@ async def async_setup_entry(
     if "capabilities" not in coordinator.diagnostics or caps.get("water_levels"):
         levels = caps.get("water_levels") or list(WATER_LEVELS)
         entities.append(HomeRunWaterSelect(coordinator, entry, levels))
-    try:
-        floors = await coordinator.client.async_get_floors()
-    except HomeRunApiError as err:
-        _LOGGER.debug("HomeRun floors unavailable: %s", err)
-        floors = {}
-    if len(floors.get("floors") or []) > 1:
-        entities.append(HomeRunFloorSelect(coordinator, entry, floors))
     async_add_entities(entities)
+
+    # The floor select appears once the robot has more than one floor, also
+    # when a floor is added later; it follows diagnostics["floors"].
+    added = False
+
+    @callback
+    def _add_floor_select() -> None:
+        nonlocal added
+        if not added and len(_floors(coordinator).get("floors") or []) > 1:
+            added = True
+            async_add_entities([HomeRunFloorSelect(coordinator, entry)])
+
+    _add_floor_select()
+    entry.async_on_unload(coordinator.async_add_listener(_add_floor_select))
+
+
+def _floors(coordinator: HomeRunCoordinator) -> dict:
+    return (coordinator.diagnostics or {}).get("floors") or {}
 
 
 class HomeRunWaterSelect(HomeRunEntity, SelectEntity):
@@ -81,20 +92,26 @@ class HomeRunFloorSelect(HomeRunEntity, SelectEntity):
     _attr_icon = "mdi:floor-plan"
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(
-        self, coordinator: HomeRunCoordinator, entry: HomeRunConfigEntry, floors: dict
-    ) -> None:
+    def __init__(self, coordinator: HomeRunCoordinator, entry: HomeRunConfigEntry) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_floor"
-        self._ids = {f["name"]: f["id"] for f in floors["floors"]}
-        self._attr_options = list(self._ids)
-        self._selected = next(
-            (n for n, i in self._ids.items() if i == floors.get("selected")), None
-        )
+
+    @property
+    def _ids(self) -> dict[str, int]:
+        return {f["name"]: f["id"] for f in _floors(self.coordinator).get("floors") or []}
+
+    @property
+    def options(self) -> list[str]:
+        return list(self._ids)
+
+    @property
+    def available(self) -> bool:
+        return super().available and len(self._ids) > 1
 
     @property
     def current_option(self) -> str | None:
-        return self._selected
+        sel = _floors(self.coordinator).get("selected")
+        return next((n for n, i in self._ids.items() if i == sel), None)
 
     async def async_select_option(self, option: str) -> None:
         try:
@@ -102,5 +119,4 @@ class HomeRunFloorSelect(HomeRunEntity, SelectEntity):
         except HomeRunApiError as err:
             _LOGGER.error("HomeRun select floor %s failed: %s", option, err)
             raise
-        self._selected = option
-        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()

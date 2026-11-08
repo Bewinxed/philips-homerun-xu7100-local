@@ -78,7 +78,6 @@ class BaseBackend:
 
     def _note_raw(self, raw):
         """Pick the zones/walls echoes out of DP 15 and the schedules out of DP 32."""
-        import base64
         import frames
         self._note_schedules(raw.get(str(_schema_dp("device_timer"))))
         dp = _schema_dp("command_trans")
@@ -153,12 +152,15 @@ class BaseBackend:
                 return _same_schedules(cur["schedules"] or [], want)
         return False
 
-    def _cloud_dp(self, code, since):
+    def _cloud_dp(self, code, since, timeout=20):
         """{'value', 'time'} of a DP's last cloud report, if newer than `since`."""
+        if timeout <= 0:
+            return None
         try:
             from tuya_cloud import TuyaCloud, load_cfg
             cfg = load_cfg()
-            r = TuyaCloud(cfg).get(f"/v2.0/cloud/thing/{cfg['device_id']}/shadow/properties?codes={code}")
+            r = TuyaCloud(cfg).get(f"/v2.0/cloud/thing/{cfg['device_id']}/shadow/properties?codes={code}",
+                                   timeout=timeout)
             p = (r.get("result") or {}).get("properties", [{}])[0]
         except Exception:
             return None
@@ -335,6 +337,9 @@ class BaseBackend:
                 return RETURNING
             if "done" in s or "full" in s or ("charg" in s and "complet" in s):
                 return DOCKED
+            # the XU2000 reports "amicro_collect_dust" while the base empties its bin
+            if "collect_dust" in s or "dust_collect" in s:
+                return DOCKED
             if "charg" in s:
                 return CHARGING
             # firmware reports states Tuya's spec doesn't document (e.g. "positioning";
@@ -347,7 +352,7 @@ class BaseBackend:
                 return PAUSED
             if ("clean" in s or "smart" in s or "zone" in s or "part" in s or "spot" in s
                     or "room" in s or "wall_follow" in s or "map" in s
-                    or "direction" in s or "collect_dust" in s):
+                    or "direction" in s):
                 return CLEANING
             if "sleep" in s or "standby" in s or "idle" in s:
                 return IDLE
@@ -447,14 +452,25 @@ class BaseBackend:
     def set_overlays(self, zones=None, walls=None, timeout=12.0) -> dict:
         """Write no-go zones and/or virtual walls (command coordinates) and wait
         for the robot to echo them back. Returns {'zones': ok, 'walls': ok}."""
+        want = {"zones": zones, "walls": walls}
+        prev = self.live_overlays()
+        ok = self._write_overlays(want, timeout)
+        # All or nothing: when only part of the change was confirmed, put the
+        # confirmed part back the way it was, so the robot isn't left half-edited.
+        if not all(ok.values()) and any(ok.values()):
+            undo = {k: (prev.get(k) if ok.get(k) else None) for k in ("zones", "walls")}
+            if all(undo[k] is not None for k in undo if ok.get(k)):
+                self._write_overlays(undo, timeout)
+        return ok
+
+    def _write_overlays(self, want, timeout) -> dict:
         import frames
         from stored_map import same_overlays
-        want = {"zones": zones, "walls": walls}
         before = self.live_overlays()["ts"]
-        if zones is not None:
-            self._send_frame(frames.ZONES_SET, frames.encode_zones(zones))
-        if walls is not None:
-            self._send_frame(frames.WALLS_SET, frames.encode_walls(walls))
+        if want.get("zones") is not None:
+            self._send_frame(frames.ZONES_SET, frames.encode_zones(want["zones"]))
+        if want.get("walls") is not None:
+            self._send_frame(frames.WALLS_SET, frames.encode_walls(want["walls"]))
         result = {k: None for k, v in want.items() if v is not None}
         sent = time.time()
         end = sent + timeout
@@ -463,11 +479,11 @@ class BaseBackend:
             live = self.live_overlays()
             if live["ts"] <= before:
                 # The robot answers with a DP 15 report that the LAN status poll
-                # doesn't pass on (seen on the XU2000); the cloud has it within a
-                # second or two.
+                # doesn't always pass on; the cloud has it within a second or two.
+                # The lookup is bounded by what is left of the timeout.
                 if time.time() - sent > 3:
-                    time.sleep(1.5)
-                    live = self._cloud_overlays(sent) or live
+                    time.sleep(min(1.5, max(0.0, end - time.time())))
+                    live = self._cloud_overlays(sent, timeout=end - time.time()) or live
                 if live["ts"] <= before:
                     continue
             for k in result:
@@ -486,18 +502,24 @@ class BaseBackend:
         older than max_age (edits made in the Smart Life app, missed LAN reports)."""
         if time.time() - self.live_overlays()["ts"] < max_age:
             return
+        if time.time() < getattr(self, "_overlays_retry", 0):
+            return   # the last cloud lookup failed moments ago
         ov = self._cloud_overlays(0)
         with self._lock:
-            if ov:
+            if not ov:
+                self._overlays_retry = time.time() + 60   # retry soon, not in max_age
+                return
+            # a LAN report that arrived during the lookup is newer: keep it
+            if ov["ts"] >= self._overlays["ts"] or self._overlays["zones"] is None:
                 for k in ("zones", "walls"):
                     if ov[k] is not None:
                         self._overlays[k] = ov[k]
-            self._overlays["ts"] = time.time()   # also after a failed fetch: retry in max_age
+            self._overlays["ts"] = max(self._overlays["ts"], time.time() - 1)
 
-    def _cloud_overlays(self, since):
+    def _cloud_overlays(self, since, timeout=20):
         """The robot's last DP 15 report from the cloud, if it is newer than `since`."""
         import frames
-        p = self._cloud_dp("command_trans", since)
+        p = self._cloud_dp("command_trans", since, timeout=timeout)
         buf = frames.decode_raw(p.get("value")) if p else None
         if buf is None:
             return None
