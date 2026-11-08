@@ -39,23 +39,29 @@ def parse(buf: bytes) -> list[tuple[int, bytes]]:
     return out
 
 
-def decode_raw(value) -> bytes | None:
-    """A raw DP value as bytes: base64 (how the XU2000 reports it) or hex."""
+def decode_raw_kind(value) -> tuple[bytes, str] | tuple[None, None]:
+    """(bytes, "hex" | "b64") for a raw DP value, by which decoding yields a frame.
+    Hex is tried first: a hex string is also valid base64, so the order matters."""
     if not isinstance(value, str) or not value:
-        return None
-    try:
-        b = base64.b64decode(value, validate=True)
-        if b[:1] == b"\xaa":
-            return b
-    except (binascii.Error, ValueError):
-        pass
+        return None, None
     try:
         b = bytes.fromhex(value)
-        if b[:1] == b"\xaa":
-            return b
+        if b[:1] in (b"\xaa", b"\xab"):
+            return b, "hex"
     except ValueError:
         pass
-    return None
+    try:
+        b = base64.b64decode(value, validate=True)
+        if b[:1] in (b"\xaa", b"\xab"):
+            return b, "b64"
+    except (binascii.Error, ValueError):
+        pass
+    return None, None
+
+
+def decode_raw(value) -> bytes | None:
+    """A raw DP value as bytes: base64 (how the XU2000 reports it) or hex."""
+    return decode_raw_kind(value)[0]
 
 
 def _points(data: bytes, n: int) -> list[list[int]]:

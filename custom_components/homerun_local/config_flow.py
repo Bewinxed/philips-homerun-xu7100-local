@@ -20,6 +20,7 @@ from .const import (
     CONF_FAN_SPEEDS,
     CONF_HOST,
     CONF_PORT,
+    CONF_TOKEN,
     DEFAULT_FAN_SPEEDS,
     DEFAULT_PORT,
     DOMAIN,
@@ -29,6 +30,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
         vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
+        vol.Optional(CONF_TOKEN): str,
     }
 )
 
@@ -47,21 +49,22 @@ class HomeRunConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = user_input[CONF_HOST]
             port = user_input[CONF_PORT]
+            token = (user_input.get(CONF_TOKEN) or "").strip() or None
 
             await self.async_set_unique_id(f"{host}:{port}")
             self._abort_if_unique_id_configured()
 
             session = async_get_clientsession(self.hass)
-            client = HomeRunApiClient(session, host, port)
+            client = HomeRunApiClient(session, host, port, token)
             try:
                 await client.async_get_state()
-            except HomeRunApiError:
-                errors["base"] = "cannot_connect"
+            except HomeRunApiError as err:
+                errors["base"] = "invalid_auth" if "401" in str(err) else "cannot_connect"
             else:
-                return self.async_create_entry(
-                    title=f"Philips HomeRun ({host})",
-                    data={CONF_HOST: host, CONF_PORT: port},
-                )
+                data = {CONF_HOST: host, CONF_PORT: port}
+                if token:
+                    data[CONF_TOKEN] = token
+                return self.async_create_entry(title=f"Philips HomeRun ({host})", data=data)
 
         return self.async_show_form(
             step_id="user",

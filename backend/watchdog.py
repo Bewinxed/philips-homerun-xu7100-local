@@ -292,6 +292,10 @@ class Watchdog(threading.Thread):
         """Add the suggestion's zone to the robot. Only on the floor the robot is
         on, and only while it is docked, so a running job isn't disturbed."""
         from stored_map import floors, floor_map_bytes, parse_header, px_to_cmd, active_floor
+        with self.c.job_lock:   # same lock as the UI's zone edits and job starts
+            return self._apply_locked(s, floors, floor_map_bytes, parse_header, px_to_cmd, active_floor)
+
+    def _apply_locked(self, s, floors, floor_map_bytes, parse_header, px_to_cmd, active_floor):
         st = self.c.state()
         if st["state"] not in ("docked", "charging"):
             return False, "the robot is not docked"

@@ -108,6 +108,16 @@ This project is not affiliated with Philips or Tuya. It was built by observing t
 
 Secrets stay out of the repo. `config.json`, `robot_secrets.json`, the ElevenLabs key, and the saved home map are all gitignored. Copy the `.example` files and fill in real values before running.
 
+### Who can use the API
+
+The backend listens on every interface, so its `/api` is protected (`backend/access.py`):
+
+- Requests from a **trusted network** are allowed: by default only this machine. Set others with `"trusted_networks": ["192.168.1.0/24"]` in `config.json` or `HOMERUN_TRUSTED_NETWORKS`.
+- Everyone else needs the **API token**: `"api_token"` in `config.json` or `HOMERUN_API_TOKEN`. Without one, a random token is written to `api_token` (gitignored) on first start. Send it as `Authorization: Bearer <token>` or `X-HomeRun-Token`. The web UI asks for it once and keeps it as a same-site cookie.
+- Other websites get no CORS access unless their origin is listed in `"cors_origins"` (`HOMERUN_CORS_ORIGINS`), for example a dashboard calling the backend directly.
+
+The Home Assistant integration has an optional token field. Its map-card proxy only passes the read and control calls the card needs, so a Home Assistant login doesn't give raw datapoint access.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

@@ -84,13 +84,28 @@ DIST = os.path.join(ROOT, "web", "dist")
 STATIC = os.path.join(ROOT, "web", "static")
 
 
+# Who may call /api (access.py): trusted networks or the API token; CORS only
+# for configured origins.
+from access import Access
+
+access = Access(_config)
+
+
+@app.before_request
+def _check_access():
+    if not request.path.startswith("/api/"):
+        return None   # the web UI's files; its API calls are checked
+    if request.method == "OPTIONS":
+        return Response(status=204, headers=access.cors_headers(request))
+    if not access.allowed(request):
+        return jsonify({"ok": False, "error": "unauthorized: send the API token"}), 401
+    return None
+
+
 @app.after_request
 def _cors(resp):
-    # LAN tool: let the Home Assistant custom Lovelace card (served from :8123)
-    # call this backend on :8787 from the browser.
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    for k, v in access.cors_headers(request).items():
+        resp.headers[k] = v
     return resp
 
 
@@ -503,8 +518,6 @@ def api_overlays_set():
     act = _active_floor()
     if not act or act["id"] != b.get("floor"):
         return jsonify({"ok": False, "error": "the robot is not on this floor; edit the floor it is on"}), 409
-    if controller.state()["state"] in ("cleaning", "returning", "paused"):
-        return jsonify({"ok": False, "error": "the robot is busy; edit zones while it is docked or idle"}), 409
     fl = next(f for f in floors() if f["id"] == act["id"])
     hdr = parse_header(floor_map_bytes(fl))
     zones = walls = None
@@ -514,7 +527,11 @@ def api_overlays_set():
     if "walls" in b:
         walls = [{"cmd": [px_to_cmd(hdr, w["px"][0], w["px"][1]), px_to_cmd(hdr, w["px"][2], w["px"][3])]}
                  for w in b["walls"]]
-    res = controller.set_overlays(zones=zones, walls=walls)
+    # check and write under the job lock: no job can start in between
+    with controller.job_lock:
+        if controller.state()["state"] in ("cleaning", "returning", "paused"):
+            return jsonify({"ok": False, "error": "the robot is busy; edit zones while it is docked or idle"}), 409
+        res = controller.set_overlays(zones=zones, walls=walls)
     _vec_cache.update(ts=0, data=None)
     _active_cache.update(key=None)
     invalidate_floors()

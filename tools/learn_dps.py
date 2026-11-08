@@ -90,7 +90,10 @@ def learn_model():
         sys.exit(f"thing model failed: {r.get('code')} {r.get('msg')}")
     sch = schema.from_thing_model(r["result"])
     os.makedirs(schema.MODELS, exist_ok=True)
-    out = os.path.join(schema.MODELS, f"{pid}.json")
+    try:
+        out = schema.model_path(pid)   # the id comes from the cloud: no paths
+    except ValueError as e:
+        sys.exit(str(e))
     doc = {"_comment": f"Generated from /v2.0/cloud/thing/{{id}}/model for product {pid} "
                        f"on {time.strftime('%Y-%m-%d')}. Edit '_model' to name the robot."}
     doc["_model"] = f"HomeRun {model}" if model else pid

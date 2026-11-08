@@ -1,4 +1,4 @@
-/*! HomeRun Map Card v0.5.0 — an interactive robot-vacuum map for Home Assistant.
+/*! HomeRun Map Card v0.6.0 — an interactive robot-vacuum map for Home Assistant.
  *  Renders the vector map from the HomeRun Local backend (rooms, walls, the
  *  robot's no-go zones and virtual walls, robot, dock, last path), lets you
  *  tap rooms to select them, switch floors and layers, and clean / dock / find
@@ -20,7 +20,8 @@
  *    connection: auto                 # optional; auto | proxy | ingress
  *    entry: <config entry id>         # optional; proxy, only with more than one robot
  *    app: 7b10aef2_homerun-local      # optional; ingress, the app's slug (found by itself)
- *    url: http://192.168.1.50:8787   # optional; call the backend directly (needs its port open)
+ *    url: http://192.168.1.50:8787   # optional; call the backend directly (needs its port open,
+ *    token: <api token>               #   this site in its cors_origins and its API token)
  *    hide: [route, nogo]              # optional; layers hidden until tapped in the legend
  *                                     # (walls, nogo, nomop, vwalls, route, dock, robot, labels)
  */
@@ -44,6 +45,9 @@ const LEGEND = [
   ['labels', 'Room names', '<text x="6" y="9.5" text-anchor="middle" font-size="9" font-weight="700" fill="currentColor">A</text>'],
 ];
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+// Everything drawn into the SVG markup is either escaped text or one of these
+const num = (v) => (Number.isFinite(+v) ? +v : 0);
+const pt = (p) => `${num(p && p[0])} ${num(p && p[1])}`;
 
 const CSS = `
   .hm { padding: 8px 12px 12px; }
@@ -161,7 +165,10 @@ class HomerunMapCard extends HTMLElement {
 
   // Every backend call goes through Home Assistant (see the header) unless a url is set
   async _fetch(path, init = {}) {
-    if (this._url) return fetch(`${this._url}${path}`, { cache: 'no-store', ...init });
+    if (this._url) {
+      const headers = { ...(init.headers || {}), ...(this._config.token ? { Authorization: `Bearer ${this._config.token}` } : {}) };
+      return fetch(`${this._url}${path}`, { cache: 'no-store', ...init, headers });
+    }
     const mode = this._config.connection || 'auto';
     if (mode !== 'ingress' && this._route !== 'ingress') {
       const sep = path.includes('?') ? '&' : '?';
@@ -218,13 +225,20 @@ class HomerunMapCard extends HTMLElement {
       const r = await this._fetch('/api/map/vector');
       const vec = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
       if (vec && vec.ok) { this._vec = vec; this._renderMap(); this._syncBar(); }
-      else this._mapEl.innerHTML = `<div class="hm-err">${esc((vec && vec.error) || 'No map yet — run a mapping pass.')}</div>`;
+      else this._error((vec && vec.error) || 'No map yet — run a mapping pass.');
     } catch (e) {
       console.warn('homerun-map-card:', e);
-      this._mapEl.innerHTML = this._url
-        ? `<div class="hm-err">Can't reach the robot backend at ${esc(this._url)}.</div>`
-        : `<div class="hm-err">Can't reach the robot (${esc(e.message || e)}). Set up the Philips HomeRun (Local) integration, or use an administrator account for the app's ingress.</div>`;
+      this._error(this._url
+        ? `Can't reach the robot backend at ${this._url}.`
+        : `Can't reach the robot (${e.message || e}). Set up the Philips HomeRun (Local) integration, or use an administrator account for the app's ingress.`);
     }
+  }
+  // Messages can contain text from the backend: set as text, never as markup
+  _error(text) {
+    const div = document.createElement('div');
+    div.className = 'hm-err';
+    div.textContent = String(text);
+    this._mapEl.replaceChildren(div);
   }
   async _loadFloors() {
     try {
@@ -235,8 +249,17 @@ class HomerunMapCard extends HTMLElement {
   }
   _renderFloors() {
     const el = this._root.querySelector('[data-floors]');
-    el.innerHTML = this._floors.length < 2 ? '' : '<span class="hm-lbl">Floor</span>' + this._floors.map((f) =>
-      `<button class="hm-chip ${f.id === this._floor ? 'on' : ''}" data-floor="${f.id}">${esc(f.name)}</button>`).join('');
+    if (this._floors.length < 2) { el.replaceChildren(); return; }
+    const label = document.createElement('span');
+    label.className = 'hm-lbl';
+    label.textContent = 'Floor';
+    el.replaceChildren(label, ...this._floors.map((f) => {
+      const b = document.createElement('button');
+      b.className = `hm-chip${f.id === this._floor ? ' on' : ''}`;
+      b.dataset.floor = String(num(f.id));
+      b.textContent = String(f.name);
+      return b;
+    }));
   }
   // the floor choice is the backend's: the HA camera and the web UI follow it
   async _selectFloor(id) {
@@ -269,7 +292,7 @@ class HomerunMapCard extends HTMLElement {
       (s.battery != null ? s.battery + '%' : '');
   }
 
-  _ring(r) { return 'M' + r.map((p) => `${p[0]} ${p[1]}`).join('L') + 'Z'; }
+  _ring(r) { return 'M' + (r || []).map(pt).join('L') + 'Z'; }
   _grp(r) { return r.group != null ? r.group : r.id; }
 
   _renderMap() {
@@ -282,14 +305,14 @@ class HomerunMapCard extends HTMLElement {
       const col = PALETTE[this._grp(room) % PALETTE.length];
       const sel = this._selected.has(room.id);
       const d = (room.rings || []).map((r) => this._ring(r)).join(' ');
-      s += `<path class="hm-room" data-room="${room.id}" d="${d}" fill="${col}" fill-rule="evenodd"
+      s += `<path class="hm-room" data-room="${num(room.id)}" d="${d}" fill="${col}" fill-rule="evenodd"
              fill-opacity="${sel ? 0.95 : 0.5}" stroke="${sel ? '#fff' : col}" stroke-width="${sel ? 1.2 : 0.5}"
              stroke-linejoin="round"/>`;
     }
     const L = this._layers;
     // walls (single path)
     if (L.walls && vec.walls && vec.walls.length) {
-      const wp = vec.walls.map(([x, y]) => `M${x} ${y}h1v1h-1z`).join('');
+      const wp = vec.walls.map(([x, y]) => `M${num(x)} ${num(y)}h1v1h-1z`).join('');
       s += `<path d="${wp}" fill="#0b1220" fill-opacity="0.9"/>`;
     }
     // robot-side no-go zones + virtual walls (non-interactive)
@@ -300,21 +323,21 @@ class HomerunMapCard extends HTMLElement {
       s += `<path d="${this._ring(z.px)}" fill="${col}" fill-opacity="0.22" stroke="${col}" stroke-width="0.5" style="pointer-events:none"/>`;
     }
     for (const w of L.vwalls ? vec.virtual_walls || [] : []) {
-      const [x1, y1, x2, y2] = w.px;
+      const [x1, y1, x2, y2] = (w.px || []).map(num);
       s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${NOGO}" stroke-width="1" stroke-linecap="round" style="pointer-events:none"/>`;
     }
     // last path
     if (L.route && vec.path && vec.path.length > 1) {
-      s += `<path d="M${vec.path.map((p) => `${p[0]} ${p[1]}`).join('L')}" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="0.6"/>`;
+      s += `<path d="M${vec.path.map(pt).join('L')}" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="0.6"/>`;
     }
     // dock + robot
-    const mark = (p, c) => `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="${c}" fill-opacity="0.28"/><circle cx="${p[0]}" cy="${p[1]}" r="2" fill="${c}" stroke="#fff" stroke-width="0.5"/>`;
+    const mark = (p, c) => `<circle cx="${num(p[0])}" cy="${num(p[1])}" r="4" fill="${c}" fill-opacity="0.28"/><circle cx="${num(p[0])}" cy="${num(p[1])}" r="2" fill="${c}" stroke="#fff" stroke-width="0.5"/>`;
     if (L.dock && vec.charger_px) s += mark(vec.charger_px, '#22c55e');
     if (L.robot && vec.robot_px) s += mark(vec.robot_px, '#38bdf8');
     // labels (one per group)
     for (const room of L.labels ? vec.rooms || [] : []) {
       if (this._grp(room) !== room.id) continue;
-      const [x, y] = room.centroid;
+      const [x, y] = (room.centroid || []).map(num);
       s += `<text x="${x}" y="${y}" text-anchor="middle" font-size="6" font-weight="600" fill="#0b1220" stroke="#fff" stroke-width="1.6" paint-order="stroke" style="pointer-events:none">${esc(room.name)}</text>`;
     }
     s += '</svg>';

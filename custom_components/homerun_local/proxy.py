@@ -26,9 +26,13 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-# The live event stream would hold a Core connection open per card, and the
-# ElevenLabs key endpoint has nothing to do with the map.
-_BLOCKED = ("api/events", "api/voice/key")
+# Only what the map card needs. Anything else (raw datapoint writes, zones,
+# schedules, voice packs) stays with the integration's own entities and actions,
+# so a Home Assistant login doesn't become raw robot access.
+_ALLOWED = {
+    "GET": {"api/state", "api/floors", "api/map/vector", "api/map", "api/capabilities"},
+    "POST": {"api/command", "api/rooms/clean", "api/floors/select"},
+}
 
 
 class HomeRunProxyView(HomeAssistantView):
@@ -45,8 +49,8 @@ class HomeRunProxyView(HomeAssistantView):
         return await self._forward(request, path)
 
     async def _forward(self, request: web.Request, path: str) -> web.StreamResponse:
-        if not path.startswith("api/") or path.startswith(_BLOCKED) or ".." in path:
-            return web.Response(status=404)
+        if path not in _ALLOWED.get(request.method, ()):
+            return web.json_response({"ok": False, "error": "not available through the proxy"}, status=403)
         hass: HomeAssistant = request.app[KEY_HASS]
         entries = [
             e for e in hass.config_entries.async_entries(DOMAIN)
@@ -62,7 +66,8 @@ class HomeRunProxyView(HomeAssistantView):
         params = {k: v for k, v in request.query.items() if k != "entry"}
         url = f"{entry.runtime_data.client.base_url}/{path}"
         body = await request.read() if request.method == "POST" else None
-        headers = {"Content-Type": request.content_type} if body else None
+        headers = {"Content-Type": request.content_type} if body else {}
+        headers.update(entry.runtime_data.client.auth_headers)
         try:
             async with asyncio.timeout(30):
                 async with async_get_clientsession(hass).request(

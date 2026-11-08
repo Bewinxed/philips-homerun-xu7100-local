@@ -6,16 +6,19 @@
         "description": "Enter the address of the HomeRun Local backend that talks to your robot over the LAN.",
         "data": {
           "host": "Host",
-          "port": "Port"
+          "port": "Port",
+          "api_token": "API token"
         },
         "data_description": {
           "host": "IP address or hostname of the machine running the HomeRun backend (server.py).",
-          "port": "TCP port the backend listens on (default 8787)."
+          "port": "TCP port the backend listens on (default 8787).",
+          "api_token": "Only when Home Assistant isn't on one of the backend's trusted networks: the token from the backend's api_token file. Not needed with the Home Assistant app."
         }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect. Check the host and port, and that the HomeRun backend is running."
+      "cannot_connect": "Failed to connect. Check the host and port, and that the HomeRun backend is running.",
+      "invalid_auth": "The backend refused the API token."
     },
     "abort": {
       "already_configured": "This HomeRun backend is already configured."

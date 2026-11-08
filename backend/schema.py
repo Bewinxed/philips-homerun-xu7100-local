@@ -13,11 +13,23 @@ Each entry is keyed by a semantic name the rest of the code uses ("fan",
 enum `values`, int `min`/`max`/`unit`, bitmap `labels`.
 """
 from __future__ import annotations
-import json, os
+import json, os, re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 MODELS = os.path.join(HERE, "models")
+# Tuya product ids are short alphanumerics; anything else must not become a path
+PRODUCT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def model_path(product_id: str) -> str:
+    """backend/models/<product_id>.json, refusing ids that aren't plain names."""
+    if not PRODUCT_ID.match(str(product_id or "")):
+        raise ValueError(f"unexpected product id {product_id!r}")
+    path = os.path.realpath(os.path.join(MODELS, f"{product_id}.json"))
+    if os.path.dirname(path) != os.path.realpath(MODELS):
+        raise ValueError(f"unexpected product id {product_id!r}")
+    return path
 
 # Tuya DP code -> semantic name. Covers the codes seen on the XU7100 plus the
 # aliases Tuya's standard 'sd' (robot vacuum) category uses on other models.
@@ -140,8 +152,8 @@ def _product_id():
 def load() -> tuple[dict, str, str]:
     """Return (schema, source description, model name)."""
     pid = _product_id()
-    if pid:
-        path = os.path.join(MODELS, f"{pid}.json")
+    if pid and PRODUCT_ID.match(str(pid)):
+        path = model_path(pid)
         data = _load_json(path)
         if data:
             model = data.get("_model") or pid

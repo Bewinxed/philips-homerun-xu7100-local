@@ -23,10 +23,18 @@ class HomeRunApiError(Exception):
 class HomeRunApiClient:
     """Small wrapper around the local backend using the HA shared session."""
 
-    def __init__(self, session: aiohttp.ClientSession, host: str, port: int) -> None:
+    def __init__(
+        self, session: aiohttp.ClientSession, host: str, port: int, token: str | None = None
+    ) -> None:
         self._session = session
         self._host = host
         self._port = int(port)
+        # only needed when Home Assistant isn't on one of the backend's trusted networks
+        self._token = token or None
+
+    @property
+    def auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
     @property
     def base_url(self) -> str:
@@ -37,7 +45,7 @@ class HomeRunApiClient:
         url = f"{self.base_url}/api/state"
         try:
             async with asyncio.timeout(10):
-                async with self._session.get(url) as resp:
+                async with self._session.get(url, headers=self.auth_headers) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
         except (aiohttp.ClientError, TimeoutError) as err:
@@ -63,7 +71,7 @@ class HomeRunApiClient:
         url = f"{self.base_url}/api/diagnostics"
         try:
             async with asyncio.timeout(10):
-                async with self._session.get(url) as resp:
+                async with self._session.get(url, headers=self.auth_headers) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
         except (aiohttp.ClientError, TimeoutError) as err:
@@ -103,7 +111,7 @@ class HomeRunApiClient:
         url = f"{self.base_url}/api/floors"
         try:
             async with asyncio.timeout(20):
-                async with self._session.get(url) as resp:
+                async with self._session.get(url, headers=self.auth_headers) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
         except (aiohttp.ClientError, TimeoutError) as err:
@@ -119,7 +127,7 @@ class HomeRunApiClient:
         url = f"{self.base_url}/api/map"
         try:
             async with asyncio.timeout(15):
-                async with self._session.get(url) as resp:
+                async with self._session.get(url, headers=self.auth_headers) as resp:
                     if resp.status == 404:
                         return None
                     resp.raise_for_status()
@@ -131,7 +139,7 @@ class HomeRunApiClient:
         url = f"{self.base_url}{path}"
         try:
             async with asyncio.timeout(timeout):
-                async with self._session.post(url, json=body) as resp:
+                async with self._session.post(url, json=body, headers=self.auth_headers) as resp:
                     if resp.status >= 400:
                         try:
                             msg = (await resp.json()).get("error")

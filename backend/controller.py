@@ -10,7 +10,7 @@ generated from the robot's cloud thing model by tools/learn_dps.py, with the
 hand-verified XU7100 schema (dp_schema.json) as the fallback. See schema.py.
 """
 from __future__ import annotations
-import json, os, threading, time, copy
+import functools, json, os, threading, time, copy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -29,6 +29,15 @@ SCHEMA, SCHEMA_SOURCE, MODEL = _load_schema()
 IDLE, CLEANING, PAUSED, RETURNING, DOCKED, CHARGING, ERROR = \
     "idle", "cleaning", "paused", "returning", "docked", "charging", "error"
 
+
+
+def _with_job_lock(fn):
+    """Run a command that starts a job under the backend's job_lock."""
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self.job_lock:
+            return fn(self, *args, **kwargs)
+    return wrapper
 
 
 def _same_schedules(a, b):
@@ -62,6 +71,10 @@ class BaseBackend:
         self._raw_b64 = None    # True when the robot reports raw DPs as base64
         # cleaning schedules from DP 32 (schedule.decode shape)
         self._schedules = {"max": 8, "schedules": None, "ts": 0.0}
+        # Held around "is the robot idle? then write zones" and around commands
+        # that start a job, so a job can't start between the check and the write;
+        # also serialises zone writes from the UI and the watchdog.
+        self.job_lock = threading.RLock()
 
     def _note_raw(self, raw):
         """Pick the zones/walls echoes out of DP 15 and the schedules out of DP 32."""
@@ -70,14 +83,11 @@ class BaseBackend:
         self._note_schedules(raw.get(str(_schema_dp("device_timer"))))
         dp = _schema_dp("command_trans")
         val = raw.get(str(dp)) if dp else None
-        buf = frames.decode_raw(val)
+        buf, kind = frames.decode_raw_kind(val)
         if buf is None:
             return
-        try:
-            base64.b64decode(val, validate=True)
-            self._raw_b64 = True
-        except Exception:
-            self._raw_b64 = False
+        # answer in the encoding the robot reports in (the XU7100 uses hex)
+        self._raw_b64 = kind == "b64"
         ov = frames.overlays(buf)
         with self._lock:
             for k in ("zones", "walls"):
@@ -349,6 +359,7 @@ class BaseBackend:
         return IDLE
 
     # ---- commands ---------------------------------------------------------
+    @_with_job_lock
     def start(self):    self._command("start")
     def pause(self):    self._command("pause")
     def stop(self):     self._command("stop")
@@ -492,6 +503,7 @@ class BaseBackend:
             return None
         return {**frames.overlays(buf), "ts": p["time"]}
 
+    @_with_job_lock
     def resume(self):
         """Carry on with the interrupted job (unlike start(), which begins a new one)."""
         p = _schema_dp("pause")
@@ -499,6 +511,7 @@ class BaseBackend:
         g = _schema_dp("power")
         if g: self._write(g, True)
 
+    @_with_job_lock
     def clean_rooms(self, room_ids, passes=1):
         """cmd 0x14: clean selected rooms.
         payload: cleanCount(1) nRooms(1) roomIds…"""
@@ -542,6 +555,7 @@ class BaseBackend:
         """cmd 0x15 query — robot echoes its room-clean config on DP 15."""
         return self._send_frame(0x15)
 
+    @_with_job_lock
     def goto(self, x, y):
         """DP 15 command_trans, cmd 0x16 — navigate to a map coordinate.
         Frame: AA 00 05 16 <x:int16be> <y:int16be> <chk>. See docs/COMMAND_PROTOCOL.md"""

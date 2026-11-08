@@ -7,6 +7,7 @@ DOMAIN = "homerun_local"
 # Config entry keys
 CONF_HOST = "host"
 CONF_PORT = "port"
+CONF_TOKEN = "api_token"
 CONF_FAN_SPEEDS = "fan_speeds"
 
 DEFAULT_PORT = 8787
