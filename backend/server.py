@@ -133,11 +133,13 @@ def api_diagnostics():
 # ---- cleaning schedules (DP 32, schedule.py) -----------------------------------
 def _public_schedules():
     """The schedules without the robot's raw room/settings bytes."""
+    import schedule
     out = []
     for i, s in enumerate(controller.schedules().get("schedules") or []):
         out.append({"index": i, "enabled": s["enabled"], "days": s["days"], "time": s["time"],
                     "whole_floor": s["whole_floor"], "other_map": s["status"] == 2,
-                    "rooms": [r["id"] for r in s.get("rooms", [])]})
+                    "rooms": [r["id"] for r in s.get("rooms", [])],
+                    **{f: s.get(f) for f in schedule.SETTING_FIELDS}})
     return out
 
 
@@ -161,7 +163,11 @@ def _edit_fields(s, b):
         s["days"] = [str(d).strip()[:3].lower() for d in days if str(d).strip()]
     if "time" in b:
         hh, mm = (int(x) for x in str(b["time"]).split(":")[:2])
+        if not (0 <= hh < 24 and 0 <= mm < 60):
+            raise ValueError(f"bad time {b['time']}")
         s["time"] = f"{hh:02d}:{mm:02d}"
+    # cleaning settings: mode, repeat (1/2/5), suction, water
+    schedule.apply_settings(s, {f: b[f] for f in schedule.SETTING_FIELDS if f in b})
     return s
 
 
@@ -173,7 +179,9 @@ def api_schedules():
 
 @app.post("/api/schedules/<int:index>")
 def api_schedule_edit(index):
-    """body: any of {"enabled": bool, "days": ["mon", ...] | "mon,wed", "time": "HH:MM"}"""
+    """body: any of {"enabled": bool, "days": ["mon", ...] | "mon,wed", "time": "HH:MM",
+    "mode": both_work|only_sweep|only_mop|intensive|quiet, "repeat": 1|2|5,
+    "suction": closed|gentle|normal|strong|max, "water": closed|low|middle|high}"""
     b = request.json or {}
 
     def change(cur):
@@ -189,14 +197,15 @@ def api_schedule_edit(index):
 
 @app.post("/api/schedules/add")
 def api_schedule_add():
-    """body: {"days": [...], "time": "HH:MM", "enabled": true} - cleans the whole
-    floor the robot is on, like a schedule made in the app."""
+    """body: {"days": [...], "time": "HH:MM", "enabled": true, + the settings of
+    POST /api/schedules/<index>} - cleans the whole floor the robot is on, like a
+    schedule made in the app; settings default to the app's (vacuum, strong, 1x)."""
+    import schedule
     b = request.json or {}
 
     def change(cur):
-        settings = next((s["settings"] for s in cur if s.get("whole_floor") and s.get("settings")), None)
         s = _edit_fields({"enabled": True, "days": [], "time": "09:00", "whole_floor": True,
-                          "settings": settings}, b)
+                          "settings": schedule.DEFAULT_SETTINGS.hex()}, b)
         return cur + [s]
     try:
         return _change_schedules(change)

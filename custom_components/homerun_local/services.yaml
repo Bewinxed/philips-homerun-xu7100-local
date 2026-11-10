@@ -16,6 +16,26 @@ add_schedule:
       default: true
       selector:
         boolean:
+    mode:
+      selector:
+        select:
+          options: [both_work, only_sweep, only_mop, intensive, quiet]
+          translation_key: schedule_mode
+    suction:
+      selector:
+        select:
+          options: [closed, gentle, normal, strong, max]
+          translation_key: schedule_suction
+    water:
+      selector:
+        select:
+          options: [closed, low, middle, high]
+          translation_key: schedule_water
+    repeat:
+      selector:
+        select:
+          options: ["1", "2", "5"]
+          translation_key: schedule_repeat
     config_entry_id:
       selector:
         config_entry:
@@ -41,6 +61,26 @@ set_schedule:
     enabled:
       selector:
         boolean:
+    mode:
+      selector:
+        select:
+          options: [both_work, only_sweep, only_mop, intensive, quiet]
+          translation_key: schedule_mode
+    suction:
+      selector:
+        select:
+          options: [closed, gentle, normal, strong, max]
+          translation_key: schedule_suction
+    water:
+      selector:
+        select:
+          options: [closed, low, middle, high]
+          translation_key: schedule_water
+    repeat:
+      selector:
+        select:
+          options: ["1", "2", "5"]
+          translation_key: schedule_repeat
     config_entry_id:
       selector:
         config_entry:

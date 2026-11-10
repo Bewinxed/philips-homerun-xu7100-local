@@ -26,3 +26,12 @@ MODEL = "HomeRun"
 # Water tank levels (backend enum -> friendly label); levels the model reports
 # that aren't listed here are shown title-cased
 WATER_LEVELS = {"closed": "Off", "low": "Low", "middle": "Medium", "high": "High"}
+
+# Cleaning settings of a schedule, as in the app's "Schoonmaakmethode"
+# (backend schedule.py; values from the robot's thing model)
+SCHEDULE_SETTINGS: dict[str, list[str]] = {
+    "mode": ["both_work", "only_sweep", "only_mop", "intensive", "quiet"],
+    "suction": ["closed", "gentle", "normal", "strong", "max"],
+    "water": ["closed", "low", "middle", "high"],
+    "repeat": ["1", "2", "5"],
+}

@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import HomeRunApiClient, HomeRunApiError
 from .proxy import HomeRunProxyView
 from .const import (
+    SCHEDULE_SETTINGS,
     CONF_HOST,
     CONF_PORT,
     CONF_TOKEN,
@@ -61,7 +62,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         await coordinator.async_request_refresh()
 
     def _fields(call: ServiceCall) -> dict:
-        data = {k: call.data[k] for k in ("enabled", "days") if k in call.data}
+        data = {k: call.data[k] for k in ("enabled", "days", "mode", "suction", "water") if k in call.data}
+        if "repeat" in call.data:
+            data["repeat"] = int(call.data["repeat"])
         if "time" in call.data:
             data["time"] = str(call.data["time"])[:5]
         return data
@@ -76,12 +79,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         await _run(call, lambda c: c.async_delete_schedule(call.data["schedule"] - 1))
 
     entry_field = {vol.Optional("config_entry_id"): cv.string}
+    settings_fields = {vol.Optional(k): vol.In(v) for k, v in SCHEDULE_SETTINGS.items() if k != "repeat"}
+    settings_fields[vol.Optional("repeat")] = vol.All(vol.Coerce(str), vol.In(SCHEDULE_SETTINGS["repeat"]))
     hass.services.async_register(DOMAIN, "add_schedule", add_schedule, schema=vol.Schema({
         **entry_field, vol.Required("time"): _TIME, vol.Optional("days", default=[]): _DAYS_SCHEMA,
-        vol.Optional("enabled", default=True): cv.boolean}))
+        vol.Optional("enabled", default=True): cv.boolean, **settings_fields}))
     hass.services.async_register(DOMAIN, "set_schedule", set_schedule, schema=vol.Schema({
         **entry_field, vol.Required("schedule"): vol.All(vol.Coerce(int), vol.Range(min=1)),
-        vol.Optional("time"): _TIME, vol.Optional("days"): _DAYS_SCHEMA, vol.Optional("enabled"): cv.boolean}))
+        vol.Optional("time"): _TIME, vol.Optional("days"): _DAYS_SCHEMA, vol.Optional("enabled"): cv.boolean,
+        **settings_fields}))
     hass.services.async_register(DOMAIN, "delete_schedule", delete_schedule, schema=vol.Schema({
         **entry_field, vol.Required("schedule"): vol.All(vol.Coerce(int), vol.Range(min=1))}))
     return True

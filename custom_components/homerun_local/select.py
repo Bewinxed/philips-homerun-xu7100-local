@@ -1,4 +1,5 @@
-"""Select platform for Philips HomeRun (Local) — water tank level, map floor."""
+"""Select platform for Philips HomeRun (Local) — water tank level, map floor and
+the cleaning settings of each schedule."""
 
 from __future__ import annotations
 
@@ -11,8 +12,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import HomeRunConfigEntry, HomeRunCoordinator
 from .api import HomeRunApiError
-from .const import WATER_LEVELS
+from .const import SCHEDULE_SETTINGS, WATER_LEVELS
 from .entity import HomeRunEntity
+from .schedule import HomeRunScheduleEntity, setup_schedule_platform
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +51,10 @@ async def async_setup_entry(
 
     _add_floor_select()
     entry.async_on_unload(coordinator.async_add_listener(_add_floor_select))
+
+    # per schedule: mode, suction, water, repeat
+    for cls in (HomeRunScheduleMode, HomeRunScheduleSuction, HomeRunScheduleWater, HomeRunScheduleRepeat):
+        setup_schedule_platform(hass, entry, async_add_entities, cls)
 
 
 def _floors(coordinator: HomeRunCoordinator) -> dict:
@@ -120,3 +126,46 @@ class HomeRunFloorSelect(HomeRunEntity, SelectEntity):
             _LOGGER.error("HomeRun select floor %s failed: %s", option, err)
             raise
         await self.coordinator.async_request_refresh()
+
+
+class _HomeRunScheduleSetting(HomeRunScheduleEntity, SelectEntity):
+    """One cleaning setting of a schedule (for a room schedule: of all its rooms)."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: HomeRunCoordinator, entry: HomeRunConfigEntry, index: int) -> None:
+        super().__init__(coordinator, entry, index)
+        self._attr_options = list(SCHEDULE_SETTINGS[self._key])
+
+    @property
+    def current_option(self) -> str | None:
+        s = self.schedule
+        value = s.get(self._key) if s else None
+        return None if value is None else str(value)
+
+    async def async_select_option(self, option: str) -> None:
+        await self._edit(**{self._key: int(option) if self._key == "repeat" else option})
+
+
+class HomeRunScheduleMode(_HomeRunScheduleSetting):
+    _key = "mode"
+    _attr_translation_key = "schedule_mode"
+    _attr_icon = "mdi:robot-vacuum"
+
+
+class HomeRunScheduleSuction(_HomeRunScheduleSetting):
+    _key = "suction"
+    _attr_translation_key = "schedule_suction"
+    _attr_icon = "mdi:fan"
+
+
+class HomeRunScheduleWater(_HomeRunScheduleSetting):
+    _key = "water"
+    _attr_translation_key = "schedule_water"
+    _attr_icon = "mdi:water"
+
+
+class HomeRunScheduleRepeat(_HomeRunScheduleSetting):
+    _key = "repeat"
+    _attr_translation_key = "schedule_repeat"
+    _attr_icon = "mdi:repeat"

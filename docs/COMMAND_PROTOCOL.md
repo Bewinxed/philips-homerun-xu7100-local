@@ -166,10 +166,19 @@ ab 00000000 | len | cmd | data | chk      len = len(cmd + data), chk = sum(cmd +
 data = 0x01 (version)  0x08 (max)  count  schedule * count
 schedule = status days hour minute 0x00 type nRooms [room * nRooms | settings(11)]
   status  1 = on, 0 = off, 2 = belongs to another map (the app shows it disabled)
-  days    bit 0 = Sunday ... bit 6 = Saturday
+  days    bit 0 = Monday ... bit 6 = Sunday   (0x02 shows as Tuesday in the app)
   type    0 = whole floor the robot is on (nRooms 0, one settings block), 1 = rooms
-  room    id(1) + settings(11): passes, ?, order, ?, ?, suction, ?, FF FF FF FF
+  room    id(1) + settings(11)
+settings = mode repeat order 00 00 suction water FF FF FF FF
+  mode    work_mode:  0 both_work (vacuum + mop), 1 only_sweep, 2 only_mop, 3 intensive, 4 quiet
+  repeat  index into clean_times [1, 2, 5]   (1x = 0 is verified; 2x / 5x are inferred)
+  order   position of the room in a room schedule (0 for whole floor)
+  suction 0 closed, 1 gentle, 2 normal, 3 strong, 4 max
+  water   cistern: 0 closed, 1 low, 2 middle, 3 high
 ```
+
+Verified against the app: a whole-floor schedule set to Vacuüm / Sterk / 1x in the
+app reports `01 00 00 00 00 03 00 ff ff ff ff`.
 
 Writing cmd 0x30 with this layout (base64, like DP 15) replaces the schedules; the
 robot reports them back on DP 32 within a second or two. Verified: deleting

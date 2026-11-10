@@ -1,7 +1,8 @@
 """Cleaning schedules: shared base for the per-schedule switch, time and text.
 
 The schedules come with /api/diagnostics (diagnostics["schedules"]); each one
-gets an on/off switch, a time and a days text entity. Schedules added later
+gets an on/off switch, a time, a days text and selects for its cleaning
+settings (mode, suction, water, repeat). Schedules added later
 (in the app, the sidebar UI or with homerun_local.add_schedule) get theirs on
 the next poll; a deleted schedule's entities become unavailable.
 """
@@ -73,7 +74,8 @@ class HomeRunScheduleEntity(HomeRunEntity):
         if not s:
             return None
         return {"days": s["days"], "time": s["time"], "whole_floor": s["whole_floor"],
-                "other_map": s["other_map"], "rooms": s["rooms"]}
+                "other_map": s["other_map"], "rooms": s["rooms"],
+                **{k: s.get(k) for k in ("mode", "suction", "water", "repeat")}}
 
     async def _edit(self, **patch: Any) -> None:
         try:

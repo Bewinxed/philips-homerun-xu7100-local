@@ -7,20 +7,37 @@ The robot reports its schedules as one 0xAB frame (see docs/COMMAND_PROTOCOL.md)
     DATA = version(1)=0x01  max(1)=0x08  count(1)  schedule * count
     schedule = status(1) days(1) hour(1) minute(1) 0x00 type(1) nRooms(1) [room * nRooms | settings]
       status   1 = on, 0 = off, 2 = belongs to another map (the app shows it disabled)
-      days     bit 0 = Sunday ... bit 6 = Saturday (0 = once)
+      days     bit 0 = Monday ... bit 6 = Sunday (0 = once); checked against the app
       type     0 = the whole floor the robot is on: nRooms 0, then one 11-byte settings block
                1 = selected rooms: per room id(1) + an 11-byte settings block
-      settings passes, water, order, ..., suction, ..., FF FF FF FF  (kept as the robot sent them)
 
-The app writes the same layout with cmd 0x30. Room settings are passed through
-unchanged; a new whole-floor schedule takes the settings block of an existing one.
+    settings (11 bytes), values as in the robot's thing model:
+      0  mode     work_mode:  0 both_work (vacuum + mop), 1 only_sweep, 2 only_mop,
+                              3 intensive, 4 quiet
+      1  repeat   index into clean_times [1, 2, 5]  (1x = 0; 2x/5x not yet seen from the app)
+      2  order    position of a room in a room schedule
+      5  suction  suction:    0 closed, 1 gentle, 2 normal, 3 strong, 4 max
+      6  water    cistern:    0 closed, 1 low, 2 middle, 3 high
+      3, 4 = 0 and 7..10 = FF on every schedule seen; kept as the robot sent them
+
+The app writes the same layout with cmd 0x30.
 """
 from __future__ import annotations
 
 REPORT, SET = 0x31, 0x30
 ON, OFF, OTHER_MAP = 1, 0, 2
-DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
-DEFAULT_SETTINGS = bytes.fromhex("0000000000020" "2ffffffff")   # seen on a new whole-floor schedule
+DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+MODES = ["both_work", "only_sweep", "only_mop", "intensive", "quiet"]
+SUCTION = ["closed", "gentle", "normal", "strong", "max"]
+WATER = ["closed", "low", "middle", "high"]
+REPEAT = [1, 2, 5]
+# byte -> (field, values); the field's value is values[byte]
+_FIELDS = {0: ("mode", MODES), 1: ("repeat", REPEAT), 5: ("suction", SUCTION), 6: ("water", WATER)}
+SETTING_FIELDS = tuple(f for f, _ in _FIELDS.values())
+
+# A new whole-floor schedule, as the app makes one: vacuum only, strong suction, 1x
+DEFAULT_SETTINGS = bytes.fromhex("0100000000" "0300" "ffffffff")
 
 
 def build(cmd: int, data: bytes) -> bytes:
@@ -49,8 +66,37 @@ def list_to_days(days) -> int:
     return mask
 
 
+def read_settings(block: str | bytes) -> dict:
+    """11-byte settings block -> {'mode', 'repeat', 'suction', 'water'} (None = unknown value)."""
+    b = bytes.fromhex(block) if isinstance(block, str) else block
+    out = {}
+    for i, (field, values) in _FIELDS.items():
+        out[field] = values[b[i]] if i < len(b) and b[i] < len(values) else None
+    return out
+
+
+def write_settings(block: str | bytes | None, fields: dict) -> str:
+    """Set the given fields in a settings block (hex); the other bytes stay as they are."""
+    b = bytearray(bytes.fromhex(block) if isinstance(block, str) else (block or DEFAULT_SETTINGS))
+    for i, (field, values) in _FIELDS.items():
+        if fields.get(field) is None:
+            continue
+        v = fields[field]
+        try:
+            v = int(v) if field == "repeat" else str(v).lower()
+        except (TypeError, ValueError):
+            v = None
+        if v not in values:
+            raise ValueError(f"{field} must be one of {', '.join(map(str, values))}")
+        b[i] = values.index(v)
+    return bytes(b).hex()
+
+
 def decode(data: bytes) -> dict:
-    """DATA of a 0x31/0x30 frame -> {'max': n, 'schedules': [...]}."""
+    """DATA of a 0x31/0x30 frame -> {'max': n, 'schedules': [...]}.
+
+    Each schedule carries its settings as fields (mode, repeat, suction, water);
+    for a room schedule those are the first room's, per room in 'rooms'."""
     out, o = [], 3
     for _ in range(data[2]):
         status, days, hour, minute, _zero, typ = data[o:o + 6]
@@ -62,12 +108,32 @@ def decode(data: bytes) -> dict:
         if typ == 0:
             s["settings"] = data[o:o + 11].hex()
             o += 11
+            s.update(read_settings(s["settings"]))
         else:
-            s["rooms"] = [{"id": data[o + 12 * k], "settings": data[o + 12 * k + 1:o + 12 * (k + 1)].hex()}
-                          for k in range(n)]
+            s["rooms"] = []
+            for k in range(n):
+                block = data[o + 12 * k + 1:o + 12 * (k + 1)]
+                s["rooms"].append({"id": data[o + 12 * k], "settings": block.hex(), **read_settings(block)})
             o += 12 * n
+            s.update({f: s["rooms"][0][f] if s["rooms"] else None for f in SETTING_FIELDS})
         out.append(s)
     return {"max": data[1], "schedules": out}
+
+
+def apply_settings(s: dict, fields: dict) -> dict:
+    """Set mode/repeat/suction/water on a schedule (on every room of a room schedule)."""
+    fields = {k: v for k, v in fields.items() if k in SETTING_FIELDS and v is not None}
+    if not fields:
+        return s
+    if s.get("whole_floor", not s.get("rooms")):
+        s["settings"] = write_settings(s.get("settings"), fields)
+        s.update(read_settings(s["settings"]))
+    else:
+        for r in s["rooms"]:
+            r["settings"] = write_settings(r["settings"], fields)
+            r.update(read_settings(r["settings"]))
+        s.update({f: s["rooms"][0][f] if s["rooms"] else None for f in SETTING_FIELDS})
+    return s
 
 
 def encode(schedules: list[dict], max_count: int = 8) -> bytes:
