@@ -123,8 +123,10 @@ SPLIT_OFFSET = 100000
 def build(robot_map_bytes, path_points=None, splits=None):
     """Return a JSON-serialisable vector map. `splits` = {parent_id: [x1,y1,x2,y2]}."""
     from tuya_vacuum.map.layout import Layout
-    hdr = _header(robot_map_bytes)
-    lay = Layout(robot_map_bytes)
+    from stored_map import split_robot_map, parse_overlays
+    layout, trailer = split_robot_map(robot_map_bytes)
+    hdr = _header(layout)
+    lay = Layout(layout)
     w, h = lay.width, lay.height
     grid = lay._map_data_array
 
@@ -230,9 +232,13 @@ def build(robot_map_bytes, path_points=None, splits=None):
         "rooms": rooms,
         "walls": wall_cells,
         # charger in pixel space: pile is world*10, origin is world*10
-        "charger_px": [round(hdr["pile_x"] / 10.0, 1), round(hdr["pile_y"] / 10.0, 1)],
+        # floors without a dock (multi-floor maps) report the pile at 0,0
+        "charger_px": [round(hdr["pile_x"] / 10.0, 1), round(hdr["pile_y"] / 10.0, 1)]
+        if hdr["pile_x"] or hdr["pile_y"] else None,
         "charger_raw": [hdr["pile_x"], hdr["pile_y"]],
     }
+    # robot-side virtual walls + no-go zones stored after the map body (XU2000)
+    out.update(parse_overlays(trailer, hdr))
     if path_points:
         out["path"] = path_points
         out["robot_px"] = path_points[-1] if path_points else None

@@ -1,0 +1,100 @@
+add_schedule:
+  fields:
+    time:
+      required: true
+      example: "09:00"
+      selector:
+        time:
+    days:
+      example: ["mon", "wed", "fri"]
+      selector:
+        select:
+          multiple: true
+          options: [mon, tue, wed, thu, fri, sat, sun]
+          translation_key: day
+    enabled:
+      default: true
+      selector:
+        boolean:
+    mode:
+      selector:
+        select:
+          options: [both_work, only_sweep, only_mop, intensive, quiet]
+          translation_key: schedule_mode
+    suction:
+      selector:
+        select:
+          options: [closed, gentle, normal, strong, max]
+          translation_key: schedule_suction
+    water:
+      selector:
+        select:
+          options: [closed, low, middle, high]
+          translation_key: schedule_water
+    repeat:
+      selector:
+        select:
+          options: ["1", "2", "5"]
+          translation_key: schedule_repeat
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: homerun_local
+set_schedule:
+  fields:
+    schedule:
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 8
+    time:
+      selector:
+        time:
+    days:
+      selector:
+        select:
+          multiple: true
+          options: [mon, tue, wed, thu, fri, sat, sun]
+          translation_key: day
+    enabled:
+      selector:
+        boolean:
+    mode:
+      selector:
+        select:
+          options: [both_work, only_sweep, only_mop, intensive, quiet]
+          translation_key: schedule_mode
+    suction:
+      selector:
+        select:
+          options: [closed, gentle, normal, strong, max]
+          translation_key: schedule_suction
+    water:
+      selector:
+        select:
+          options: [closed, low, middle, high]
+          translation_key: schedule_water
+    repeat:
+      selector:
+        select:
+          options: ["1", "2", "5"]
+          translation_key: schedule_repeat
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: homerun_local
+delete_schedule:
+  fields:
+    schedule:
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 8
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: homerun_local

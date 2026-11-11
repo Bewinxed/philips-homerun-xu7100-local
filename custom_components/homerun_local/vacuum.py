@@ -82,10 +82,12 @@ class HomeRunVacuum(HomeRunEntity, StateVacuumEntity):
     def fan_speed_list(self) -> list[str]:
         """Return the selectable fan speeds.
 
-        Starts from the configured list and merges in whatever the live state
+        Uses the model's own suction levels when the backend reports them,
+        else the configured list, and merges in whatever the live state
         reports, so an unexpected level from the robot is still selectable.
         """
-        speeds = list(self._fan_speeds)
+        caps = self.diag.get("capabilities") or {}
+        speeds = list(caps.get("fan_levels") or self._fan_speeds)
         live = self.data.get("fan")
         if live and live not in speeds:
             speeds.append(live)

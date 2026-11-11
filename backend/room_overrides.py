@@ -19,9 +19,31 @@ ROOT = os.path.dirname(HERE)
 FILE = os.path.join(ROOT, "maps", "room_overrides.json")
 
 
-def _load() -> dict:
+def _file() -> str:
+    """Room ids restart on every floor of a multi-floor robot, so each floor's
+    edits live in their own file: the selected floor, or the one the map views
+    show by default (the newest upload) when none was chosen."""
     try:
-        with open(FILE) as f:
+        from stored_map import current_floor_id
+        fid = current_floor_id()
+    except Exception:
+        fid = None
+    if fid is None:
+        return FILE
+    path = os.path.join(ROOT, "maps", f"room_overrides_{fid}.json")
+    # Edits made before per-floor files existed belong to the floor that was
+    # shown then; the first floor without a file of its own adopts them, once.
+    if not os.path.exists(path) and os.path.exists(FILE):
+        try:
+            os.replace(FILE, path)
+        except OSError:
+            pass
+    return path
+
+
+def _load(path: str | None = None) -> dict:
+    try:
+        with open(path or _file()) as f:
             d = json.load(f)
     except Exception:
         d = {}
@@ -31,12 +53,19 @@ def _load() -> dict:
     return d
 
 
-def _save(d: dict):
-    os.makedirs(os.path.dirname(FILE), exist_ok=True)
-    tmp = FILE + ".tmp"
+def _edit():
+    """(overrides, path) for one read-modify-write: the floor is resolved once,
+    so a floor switch in between can't save one floor's edits into another's."""
+    path = _file()
+    return _load(path), path
+
+
+def _save(d: dict, path: str):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(d, f, indent=2)
-    os.replace(tmp, FILE)
+    os.replace(tmp, path)
 
 
 def _root_map(groups: list[list[int]]) -> dict[int, int]:
@@ -80,15 +109,15 @@ def apply(rooms: list[dict]) -> list[dict]:
 
 
 def rename(rid: int, name: str):
-    ov = _load()
+    ov, path = _edit()
     root = _root_map(ov["groups"]).get(int(rid), int(rid))
     ov["labels"][str(root)] = str(name)[:40]
-    _save(ov)
+    _save(ov, path)
 
 
 def merge(a: int, b: int):
     a, b = int(a), int(b)
-    ov = _load()
+    ov, path = _edit()
     groups = [set(map(int, g)) for g in ov["groups"]]
     # collect every existing group touching a or b, plus {a,b}, into one set
     union, rest = {a, b}, []
@@ -99,15 +128,15 @@ def merge(a: int, b: int):
             rest.append(g)
     rest.append(union)
     ov["groups"] = [sorted(g) for g in rest if len(g) > 1]
-    _save(ov)
+    _save(ov, path)
 
 
 def unmerge(rid: int):
     """Drop `rid`'s group entirely (splits the whole merged set back apart)."""
     rid = int(rid)
-    ov = _load()
+    ov, path = _edit()
     ov["groups"] = [g for g in ov["groups"] if rid not in [int(x) for x in g]]
-    _save(ov)
+    _save(ov, path)
 
 
 # ---- splits (a user-drawn line that cuts one room into two) ------------------
@@ -119,15 +148,15 @@ def get_splits() -> dict[int, list]:
 
 
 def set_split(parent_id: int, line: list):
-    ov = _load()
+    ov, path = _edit()
     ov["splits"][str(int(parent_id))] = [float(v) for v in line][:4]
-    _save(ov)
+    _save(ov, path)
 
 
 def clear_split(rid: int):
     """Undo a split; accepts either half (child id maps back to its parent)."""
     rid = int(rid)
     parent = rid - SPLIT_OFFSET if rid >= SPLIT_OFFSET else rid
-    ov = _load()
+    ov, path = _edit()
     ov["splits"].pop(str(parent), None)
-    _save(ov)
+    _save(ov, path)

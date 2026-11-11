@@ -1,15 +1,16 @@
-"""Semantic control layer for the Philips HomeRun XU7100 (Tuya category 'sd').
+"""Semantic control layer for Philips HomeRun robots (Tuya category 'sd').
 
 Two interchangeable backends behind one interface:
   * TuyaBackend  - real robot over the LAN (tinytuya, no cloud needed for control)
   * SimBackend   - in-memory state machine, so the whole UI/HA stack is testable
                    before the local_key exists.
 
-The semantic <-> DP mapping lives in dp_schema.json and is refined by
-tools/learn_dps.py once we can actually poll the robot.
+The semantic <-> DP mapping is per model: backend/models/<product_id>.json,
+generated from the robot's cloud thing model by tools/learn_dps.py, with the
+hand-verified XU7100 schema (dp_schema.json) as the fallback. See schema.py.
 """
 from __future__ import annotations
-import json, os, threading, time, copy
+import functools, json, os, threading, time, copy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -21,19 +22,39 @@ def _load_json(path, default=None):
     except FileNotFoundError:
         return default
 
-SCHEMA = _load_json(os.path.join(HERE, "dp_schema.json"), {})
+from schema import load as _load_schema
+SCHEMA, SCHEMA_SOURCE, MODEL = _load_schema()
 
 # Canonical states we normalise every backend into (mirrors HA vacuum states)
 IDLE, CLEANING, PAUSED, RETURNING, DOCKED, CHARGING, ERROR = \
     "idle", "cleaning", "paused", "returning", "docked", "charging", "error"
 
-FAN_LEVELS = ["quiet", "normal", "strong", "max"]
-WATER_LEVELS = ["low", "middle", "high", "closed"]
+
+
+def _with_job_lock(fn):
+    """Run a command that starts a job under the backend's job_lock."""
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self.job_lock:
+            return fn(self, *args, **kwargs)
+    return wrapper
+
+
+def _same_schedules(a, b):
+    """Same schedules, ignoring the derived 'enabled' flag."""
+    def norm(lst):
+        return [{k: v for k, v in s.items() if k != "enabled"} for s in lst]
+    return norm(a) == norm(b)
 
 
 def _schema_dp(name):
     e = SCHEMA.get(name)
     return e.get("dp") if isinstance(e, dict) else None
+
+
+def _schema_values(name):
+    e = SCHEMA.get(name)
+    return list(e.get("values") or []) if isinstance(e, dict) else []
 
 
 class BaseBackend:
@@ -45,6 +66,111 @@ class BaseBackend:
         self._raw = {}
         self._last_update = 0.0
         self.connected = False
+        # last zones / walls the robot reported on DP 15 (frames.overlays shape)
+        self._overlays = {"zones": None, "walls": None, "ts": 0.0}
+        self._raw_b64 = None    # True when the robot reports raw DPs as base64
+        # cleaning schedules from DP 32 (schedule.decode shape)
+        self._schedules = {"max": 8, "schedules": None, "ts": 0.0}
+        # Held around "is the robot idle? then write zones" and around commands
+        # that start a job, so a job can't start between the check and the write;
+        # also serialises zone writes from the UI and the watchdog.
+        self.job_lock = threading.RLock()
+
+    def _note_raw(self, raw):
+        """Pick the zones/walls echoes out of DP 15 and the schedules out of DP 32."""
+        import frames
+        self._note_schedules(raw.get(str(_schema_dp("device_timer"))))
+        dp = _schema_dp("command_trans")
+        val = raw.get(str(dp)) if dp else None
+        buf, kind = frames.decode_raw_kind(val)
+        if buf is None:
+            return
+        # answer in the encoding the robot reports in (the XU7100 uses hex)
+        self._raw_b64 = kind == "b64"
+        ov = frames.overlays(buf)
+        with self._lock:
+            for k in ("zones", "walls"):
+                if ov[k] is not None:
+                    self._overlays[k] = ov[k]
+                    self._overlays["ts"] = time.time()
+
+    def _note_schedules(self, val, ts=None):
+        import base64
+        import schedule
+        if not isinstance(val, str) or not val:
+            return False
+        try:
+            fr = schedule.parse_frame(base64.b64decode(val))
+        except Exception:
+            return False
+        if not fr or fr[0] not in (schedule.REPORT, schedule.SET):
+            return False
+        d = schedule.decode(fr[1])
+        with self._lock:
+            self._schedules = {**d, "ts": ts or time.time()}
+        return True
+
+    def schedules(self, max_age=600) -> dict:
+        """The robot's cleaning schedules; from its last cloud report when ours
+        are older than max_age (it reports DP 32 rarely, e.g. after app edits)."""
+        with self._lock:
+            cur = dict(self._schedules)
+        if time.time() - cur["ts"] >= max_age:
+            p = self._cloud_dp("device_timer", 0)
+            if not (p and self._note_schedules(p["value"], time.time())):
+                with self._lock:
+                    self._schedules["ts"] = time.time()   # retry in max_age
+            with self._lock:
+                cur = dict(self._schedules)
+        return cur
+
+    def set_schedules(self, schedules, timeout=12.0) -> bool:
+        """Replace the robot's schedules and wait until it reports them back."""
+        import base64
+        import schedule
+        dp = _schema_dp("device_timer")
+        if not dp:
+            raise ValueError("this model has no schedules")
+        data = schedule.encode(schedules, self._schedules.get("max") or 8)
+        want = schedule.decode(data)["schedules"]
+        before = self._schedules["ts"]
+        sent = time.time()
+        self._write(dp, base64.b64encode(schedule.build(schedule.SET, data)).decode())
+        end = sent + timeout
+        while time.time() < end:
+            time.sleep(0.5)
+            with self._lock:
+                cur = dict(self._schedules)
+            if cur["ts"] <= before and time.time() - sent > 3:
+                time.sleep(1.5)
+                p = self._cloud_dp("device_timer", sent)
+                if p:
+                    self._note_schedules(p["value"], p["time"])
+                with self._lock:
+                    cur = dict(self._schedules)
+            if cur["ts"] > before:
+                return _same_schedules(cur["schedules"] or [], want)
+        return False
+
+    def _cloud_dp(self, code, since, timeout=20):
+        """{'value', 'time'} of a DP's last cloud report, if newer than `since`."""
+        if timeout <= 0:
+            return None
+        try:
+            from tuya_cloud import TuyaCloud, load_cfg
+            cfg = load_cfg()
+            r = TuyaCloud(cfg).get(f"/v2.0/cloud/thing/{cfg['device_id']}/shadow/properties?codes={code}",
+                                   timeout=timeout)
+            p = (r.get("result") or {}).get("properties", [{}])[0]
+        except Exception:
+            return None
+        if not p.get("time") or p["time"] / 1000 < since - 1:
+            return None
+        return {"value": p.get("value"), "time": p["time"] / 1000}
+
+    def live_overlays(self) -> dict:
+        with self._lock:
+            return dict(self._overlays)
 
     # ---- semantic state ---------------------------------------------------
     def state(self) -> dict:
@@ -64,12 +190,13 @@ class BaseBackend:
             "last_update": self._last_update,
         }
 
-    # Consumable life counters: value = minutes remaining, max from the Tuya DP spec.
+    # Consumable life counters: value = minutes remaining. The full life comes
+    # from the model's DP spec ("max"); these defaults are the XU7100's.
     CONSUMABLES = {
-        "17": ("Side brush", 9000),
-        "19": ("Main brush", 18000),
-        "21": ("Filter", 9000),
-        "23": ("Mop cloth", 9000),
+        "edge_brush_life": ("Side brush", 9000),
+        "roll_brush_life": ("Main brush", 18000),
+        "filter_life": ("Filter", 9000),
+        "rag_life": ("Mop cloth", 9000),
     }
     # Toggles worth surfacing in the UI (semantic name -> label)
     TOGGLES = {
@@ -78,8 +205,9 @@ class BaseBackend:
         "vibration": "Vibration mop", "customize_mode": "Custom mode",
         "dust_collect": "Auto-empty dock",
     }
-    # Fault bitmap — AUTHORITATIVE labels, pulled from this device's own Tuya
-    # DP specification (status 'fault', type Bitmap). Do not guess these.
+    # Fault bitmap — AUTHORITATIVE labels, pulled from the XU7100's own Tuya
+    # DP specification (status 'fault', type Bitmap). Do not guess these. A
+    # model schema with its own bitmap labels overrides this list.
     FAULT_BITS = [
         "lidar_shelter", "wheel_up", "low_battery", "dust_water", "ground_start",
         "cliff_ir", "co_sensor", "go_dock", "navigation", "escape", "wait_charge",
@@ -102,12 +230,31 @@ class BaseBackend:
         "escape": "trapped, could not escape",
     }
 
+    def capabilities(self) -> dict:
+        """What this model supports, so the UI and HA only offer real controls."""
+        return {
+            "model": MODEL,
+            # the robot's own name from the cloud (robot_secrets.json), if known
+            "name": (getattr(self, "cfg", None) or {}).get("name") or None,
+            "schema": SCHEMA_SOURCE,
+            "fan_levels": _schema_values("fan"),
+            "water_levels": _schema_values("water"),
+            "modes": _schema_values("mode"),
+            "features": sorted(n for n, e in SCHEMA.items()
+                               if isinstance(e, dict) and e.get("dp")),
+        }
+
     def diagnostics(self) -> dict:
         """Everything the robot actually exposes about its own health."""
         raw = self.raw()
-        d = {"consumables": [], "faults": [], "totals": {}, "device": {}, "components": {}}
+        d = {"consumables": [], "faults": [], "totals": {}, "device": {}, "components": {},
+             "capabilities": self.capabilities()}
 
-        for dp, (name, full) in self.CONSUMABLES.items():
+        for sem, (name, full) in self.CONSUMABLES.items():
+            dp = _schema_dp(sem)
+            if not dp:
+                continue
+            full = SCHEMA[sem].get("max") or full
             v = raw.get(dp)
             if isinstance(v, (int, float)):
                 d["consumables"].append({
@@ -116,22 +263,31 @@ class BaseBackend:
                     "hours_left": round(v / 60.0, 1),
                 })
 
-        f = raw.get("28")
+        f = self._get(raw, "fault")
         if isinstance(f, int):
             d["fault_code"] = f
-            names = [n for i, n in enumerate(self.FAULT_BITS) if f & (1 << i)]
+            fs = SCHEMA.get("fault") or {}
+            if fs.get("labels"):
+                bits = fs["labels"]
+            elif SCHEMA_SOURCE == "dp_schema.json":
+                bits = self.FAULT_BITS
+            else:   # model publishes no names: don't guess with the XU7100's
+                bits = [f"fault_bit_{i}" for i in range(max(fs.get("maxlen") or 0, f.bit_length()))]
+            names = [n for i, n in enumerate(bits) if f & (1 << i)]
             d["faults"] = names
             d["fault_detail"] = [
                 {"name": n, "hint": self.FAULT_HINTS.get(n, "")} for n in names
             ]
 
-        for dp, key, unit in (("29", "total_area", "m2"), ("30", "total_cleans", "runs"),
-                              ("31", "total_time", "min")):
-            if dp in raw:
+        for sem, key, unit in (("total_area", "total_area", "m2"),
+                               ("total_count", "total_cleans", "runs"),
+                               ("total_time", "total_time", "min")):
+            dp = _schema_dp(sem)
+            if dp and dp in raw:
                 d["totals"][key] = {"value": raw[dp], "unit": unit}
 
-        # device_info blob (wifi/rssi/ip/mac/firmware) arrives on DP 34 as base64 JSON
-        info = raw.get("34")
+        # device_info blob (wifi/rssi/ip/mac/firmware) arrives as base64 JSON
+        info = self._get(raw, "device_info")
         if isinstance(info, str):
             try:
                 import base64 as _b64
@@ -139,9 +295,11 @@ class BaseBackend:
             except Exception:
                 pass
 
-        for dp, label in (("40", "mop"), ("41", "work mode"), ("106", "clean type"),
-                          ("9", "suction"), ("10", "water"), ("103", "remote mode")):
-            if dp in raw:
+        for sem, label in (("mop_state", "mop"), ("work_mode", "work mode"),
+                           ("no_mop_zones", "clean type"), ("fan", "suction"),
+                           ("water", "water"), ("remote_mode", "remote mode")):
+            dp = _schema_dp(sem)
+            if dp and dp in raw:
                 d["components"][label] = raw[dp]
 
         d["toggles"] = {}
@@ -179,14 +337,22 @@ class BaseBackend:
                 return RETURNING
             if "done" in s or "full" in s or ("charg" in s and "complet" in s):
                 return DOCKED
+            # the XU2000 reports "amicro_collect_dust" while the base empties its bin
+            if "collect_dust" in s or "dust_collect" in s:
+                return DOCKED
             if "charg" in s:
                 return CHARGING
-            # firmware reports states Tuya's spec doesn't document (e.g. "positioning")
-            if "position" in s or "locat" in s or "relocat" in s or "goto_pos" in s:
-                return CLEANING
+            # firmware reports states Tuya's spec doesn't document (e.g. "positioning";
+            # the XU2000 spells it "repositing"). It relocalises on the way home
+            # too, so follow the mode it was given.
+            if ("position" in s or "reposit" in s or "locat" in s or "relocat" in s
+                    or "goto_pos" in s):
+                return RETURNING if self._get(raw, "mode") == "chargego" else CLEANING
             if "paus" in s:
                 return PAUSED
-            if "clean" in s or "smart" in s or "zone" in s or "part" in s or "spot" in s:
+            if ("clean" in s or "smart" in s or "zone" in s or "part" in s or "spot" in s
+                    or "room" in s or "wall_follow" in s or "map" in s
+                    or "direction" in s):
                 return CLEANING
             if "sleep" in s or "standby" in s or "idle" in s:
                 return IDLE
@@ -198,6 +364,7 @@ class BaseBackend:
         return IDLE
 
     # ---- commands ---------------------------------------------------------
+    @_with_job_lock
     def start(self):    self._command("start")
     def pause(self):    self._command("pause")
     def stop(self):     self._command("stop")
@@ -216,6 +383,13 @@ class BaseBackend:
         self._write(str(dp), value)
 
     # ---- extended controls (all datapoints verified via cloud shadow) --------
+    def empty_bin(self):
+        """dust_collection_switch — tell the auto-empty base to empty the bin."""
+        dp = _schema_dp("dust_collect")
+        if not dp:
+            raise ValueError("this model has no auto-empty dock")
+        self._write(dp, True)
+
     def start_mapping(self):
         """DP 104 create_map — build a fresh map without cleaning."""
         dp = _schema_dp("create_map")
@@ -254,13 +428,112 @@ class BaseBackend:
         body = bytes([cmd]) + bytes(data)
         return bytes([0xAA, 0x00, len(body)]) + body + bytes([sum(body) & 0xFF])
 
+    def _raw_value(self, frame: bytes) -> str:
+        # The XU2000 reports DP 15 as base64 and only acts on base64 (hex is
+        # ignored, verified). The original XU7100 code sent hex, so the
+        # hand-made XU7100 schema keeps hex until the robot reports a frame.
+        import base64
+        b64 = self._raw_b64 if self._raw_b64 is not None else SCHEMA_SOURCE != "dp_schema.json"
+        return base64.b64encode(frame).decode() if b64 else frame.hex()
+
     def _send_frame(self, cmd, data=b""):
         f = self._frame(cmd, data)
         dp = _schema_dp("command_trans")
         if dp:
-            self._write(dp, f.hex())
+            self._write(dp, self._raw_value(f))
         return f.hex()
 
+    def query_overlays(self):
+        """Ask the robot to report its no-go zones and virtual walls (read-only)."""
+        import frames
+        self._send_frame(frames.ZONES_GET)
+        self._send_frame(frames.WALLS_GET)
+
+    def set_overlays(self, zones=None, walls=None, timeout=12.0) -> dict:
+        """Write no-go zones and/or virtual walls (command coordinates) and wait
+        for the robot to echo them back. Returns {'zones': ok, 'walls': ok}."""
+        want = {"zones": zones, "walls": walls}
+        prev = self.live_overlays()
+        ok = self._write_overlays(want, timeout)
+        # All or nothing: when only part of the change was confirmed, put the
+        # confirmed part back the way it was, so the robot isn't left half-edited.
+        if not all(ok.values()) and any(ok.values()):
+            undo = {k: (prev.get(k) if ok.get(k) else None) for k in ("zones", "walls")}
+            if all(undo[k] is not None for k in undo if ok.get(k)):
+                self._write_overlays(undo, timeout)
+        return ok
+
+    def _write_overlays(self, want, timeout) -> dict:
+        import frames
+        from stored_map import same_overlays
+        before = self.live_overlays()["ts"]
+        if want.get("zones") is not None:
+            self._send_frame(frames.ZONES_SET, frames.encode_zones(want["zones"]))
+        if want.get("walls") is not None:
+            self._send_frame(frames.WALLS_SET, frames.encode_walls(want["walls"]))
+        result = {k: None for k, v in want.items() if v is not None}
+        sent = time.time()
+        end = sent + timeout
+        while time.time() < end and None in result.values():
+            time.sleep(0.5)
+            live = self.live_overlays()
+            if live["ts"] <= before:
+                # The robot answers with a DP 15 report that the LAN status poll
+                # doesn't always pass on; the cloud has it within a second or two.
+                # The lookup is bounded by what is left of the timeout.
+                if time.time() - sent > 3:
+                    time.sleep(min(1.5, max(0.0, end - time.time())))
+                    live = self._cloud_overlays(sent, timeout=end - time.time()) or live
+                if live["ts"] <= before:
+                    continue
+            for k in result:
+                if live.get(k) is not None:
+                    result[k] = same_overlays({k: live[k]}, {k: want[k]})
+        ok = {k: bool(v) for k, v in result.items()}
+        with self._lock:
+            for k, good in ok.items():
+                if good:
+                    self._overlays[k] = want[k]
+                    self._overlays["ts"] = time.time()
+        return ok
+
+    def refresh_overlays(self, max_age=600):
+        """Take the robot's zones/walls from its last cloud report when ours are
+        older than max_age (edits made in the Smart Life app, missed LAN reports)."""
+        if time.time() - self.live_overlays()["ts"] < max_age:
+            return
+        if time.time() < getattr(self, "_overlays_retry", 0):
+            return   # the last cloud lookup failed moments ago
+        ov = self._cloud_overlays(0)
+        with self._lock:
+            if not ov:
+                self._overlays_retry = time.time() + 60   # retry soon, not in max_age
+                return
+            # a LAN report that arrived during the lookup is newer: keep it
+            if ov["ts"] >= self._overlays["ts"] or self._overlays["zones"] is None:
+                for k in ("zones", "walls"):
+                    if ov[k] is not None:
+                        self._overlays[k] = ov[k]
+            self._overlays["ts"] = max(self._overlays["ts"], time.time() - 1)
+
+    def _cloud_overlays(self, since, timeout=20):
+        """The robot's last DP 15 report from the cloud, if it is newer than `since`."""
+        import frames
+        p = self._cloud_dp("command_trans", since, timeout=timeout)
+        buf = frames.decode_raw(p.get("value")) if p else None
+        if buf is None:
+            return None
+        return {**frames.overlays(buf), "ts": p["time"]}
+
+    @_with_job_lock
+    def resume(self):
+        """Carry on with the interrupted job (unlike start(), which begins a new one)."""
+        p = _schema_dp("pause")
+        if p: self._write(p, False)
+        g = _schema_dp("power")
+        if g: self._write(g, True)
+
+    @_with_job_lock
     def clean_rooms(self, room_ids, passes=1):
         """cmd 0x14: clean selected rooms.
         payload: cleanCount(1) nRooms(1) roomIds…"""
@@ -304,6 +577,7 @@ class BaseBackend:
         """cmd 0x15 query — robot echoes its room-clean config on DP 15."""
         return self._send_frame(0x15)
 
+    @_with_job_lock
     def goto(self, x, y):
         """DP 15 command_trans, cmd 0x16 — navigate to a map coordinate.
         Frame: AA 00 05 16 <x:int16be> <y:int16be> <chk>. See docs/COMMAND_PROTOCOL.md"""
@@ -312,7 +586,7 @@ class BaseBackend:
         frame = bytes([0xAA, 0x00, len(body)]) + body + bytes([sum(body) & 0xFF])
         dp = _schema_dp("command_trans")
         if dp:
-            self._write(dp, frame.hex())
+            self._write(dp, self._raw_value(frame))
             m = _schema_dp("mode")
             if m: self._write(m, "pose")
             p = _schema_dp("power")
@@ -347,13 +621,37 @@ class TuyaBackend(BaseBackend):
         self.dev.set_socketTimeout(6)
 
     def refresh(self):
-        data = self.dev.status()
-        if isinstance(data, dict) and "dps" in data:
+        # status() returns the NEXT message on the persistent socket. The robot
+        # also pushes changes by itself (and answers every write), so reading
+        # one message per poll falls further and further behind: the app showed
+        # "charging, 73%" while the robot was at 83% and off the dock. Drain
+        # everything queued after the query and apply it in arrival order.
+        msgs = [self.dev.status()]
+        self.dev.set_socketTimeout(0.4)
+        try:
+            for _ in range(100):
+                m = self.dev.receive()
+                if not m or not isinstance(m, dict) or "Err" in m:
+                    break
+                msgs.append(m)
+        except Exception:
+            pass
+        finally:
+            self.dev.set_socketTimeout(6)
+        got = False
+        for data in msgs:
+            if isinstance(data, dict) and isinstance(data.get("dps"), dict):
+                dps = {str(k): v for k, v in data["dps"].items()}
+                # merge: pushes carry only the DPs that changed
+                with self._lock:
+                    self._raw.update(dps)
+                self._note_raw(dps)
+                got = True
+        if got:
             with self._lock:
-                self._raw = {str(k): v for k, v in data["dps"].items()}
                 self._last_update = time.time()
                 self.connected = True
-        elif isinstance(data, dict) and data.get("Error"):
+        elif isinstance(msgs[0], dict) and msgs[0].get("Error"):
             self.connected = False
         return self.raw()
 
@@ -469,10 +767,16 @@ def make_controller():
     if cfg.get("local_key"):
         try:
             b = TuyaBackend(cfg)
-            b.refresh()
-            return b
         except Exception as e:
             print(f"[controller] real backend failed ({e}); using simulator")
+            return SimBackend()
+        # An asleep or briefly unreachable robot must not swap in the simulator
+        # for good: keep the real backend, the poll loop retries.
+        try:
+            b.refresh()
+        except Exception as e:
+            print(f"[controller] robot not reachable yet ({e}); retrying in the poll loop")
+        return b
     return SimBackend()
 
 

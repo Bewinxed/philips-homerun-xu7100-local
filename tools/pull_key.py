@@ -44,9 +44,39 @@ secrets = {
     "product_id": res.get("product_id", ""),
     "online": res.get("online"),
 }
+
+
+def probe_version(ip, version_hint):
+    """Find the LAN protocol: the XU7100 speaks 3.3, the XU2000 3.5."""
+    sys.path.insert(0, os.path.join(ROOT, "pylib"))
+    import tinytuya
+    order = [float(version_hint)] + [v for v in (3.5, 3.4, 3.3) if v != float(version_hint)]
+    for v in order:
+        d = tinytuya.Device(did, ip, local_key, version=v)
+        d.set_socketTimeout(5)
+        d.set_socketRetryLimit(1)
+        try:
+            r = d.status()
+        finally:
+            d.close()
+        if isinstance(r, dict) and "dps" in r:
+            return v
+    return None
+
+
+try:
+    v = probe_version(secrets["ip"], secrets["version"])
+    if v:
+        secrets["version"] = v
+        print(f"     LAN protocol: Tuya {v}")
+    else:
+        print(f"     note: robot did not answer on {secrets['ip']} — check the ip in config.json")
+except Exception as e:
+    print("     note: could not probe the LAN protocol:", e)
+
 with open(os.path.join(ROOT, "robot_secrets.json"), "w") as f:
     json.dump(secrets, f, indent=2)
-print(f"\n[OK] wrote robot_secrets.json — local_key = {local_key[:4]}… (len {len(local_key)})")
+print(f"\n[OK] wrote robot_secrets.json — local_key received (len {len(local_key)})")
 print(f"     device online: {res.get('online')}, name: {res.get('name','')}")
 
 # Pull DP specification to refine the semantic schema
@@ -62,4 +92,12 @@ if specs.get("success"):
 else:
     print("     note: could not pull DP spec:", specs.get("msg"))
 
-print("\nNext: .venv/bin/python tools/learn_dps.py   then start the server.")
+# Per-model DP schema, so models other than the XU7100 get their own DP map
+try:
+    sys.path.insert(0, HERE)
+    import learn_dps
+    learn_dps.learn_model()
+except SystemExit as e:
+    print("     note: could not build model schema:", e)
+
+print("\nNext: start the server (./homerun start).")

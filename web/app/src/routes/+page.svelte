@@ -3,8 +3,8 @@
 	import { toast } from 'svelte-sonner';
 	import {
 		api, diagnostics, startMapping, drive, toggle, setVolume,
-		mapVector, cleanRooms, renameRoom, mergeRooms, unmergeRoom, splitRoom, unsplitRoom, roomAttrs, emptyBin,
-		type RobotState, type MapMeta, type Diagnostics
+		mapVector, floors as getFloors, selectFloor, saveOverlays, decideSuggestion, cleanRooms, renameRoom, mergeRooms, unmergeRoom, splitRoom, unsplitRoom, roomAttrs, emptyBin,
+		type RobotState, type MapMeta, type Diagnostics, type Floor
 	} from '$lib/api';
 	import { area, dur } from '$lib/format';
 	import { materialize, rise } from '$lib/transitions';
@@ -15,14 +15,16 @@
 	import RobotAvatar from '$lib/RobotAvatar.svelte';
 	import VoiceStudio from '$lib/VoiceStudio.svelte';
 	import CareTab from '$lib/panels/CareTab.svelte';
+	import ScheduleTab from '$lib/panels/ScheduleTab.svelte';
 	import {
 		Play, Pause, Square, House, Radar, RotateCw, Wifi, WifiOff, Wind, Droplets,
-		Sparkles, Wrench, Wand2, Pencil, Check
+		Sparkles, Wrench, Wand2, Pencil, Check, CalendarClock
 	} from '@lucide/svelte';
 
-	type Tab = 'home' | 'care' | 'voice';
+	type Tab = 'home' | 'schedule' | 'care' | 'voice';
 	const TABS: { id: Tab; label: string; icon: any }[] = [
 		{ id: 'home', label: 'Home', icon: House },
+		{ id: 'schedule', label: 'Schedule', icon: CalendarClock },
 		{ id: 'care', label: 'Care', icon: Wrench },
 		{ id: 'voice', label: 'Voice', icon: Wand2 }
 	];
@@ -38,21 +40,47 @@
 
 	async function reloadVector(force = false) { try { vec = await mapVector(force); } catch {} }
 
-	const SUCTION = [
-		{ value: 'gentle', label: 'Gentle' }, { value: 'normal', label: 'Normal' },
-		{ value: 'strong', label: 'Strong' }, { value: 'max', label: 'Max' }
-	];
-	const WATER = [
-		{ value: 'closed', label: 'Off' }, { value: 'low', label: 'Low' },
-		{ value: 'middle', label: 'Medium' }, { value: 'high', label: 'High' }
-	];
+	// one stored map per floor; the choice only changes what we show, not the robot
+	let floorList = $state<Floor[]>([]);
+	let floorId = $state<number | null>(null);
+	let activeFloor = $state<number | null>(null);
+	const activeFloorName = $derived(floorList.find((f) => f.id === activeFloor)?.name ?? null);
+	async function loadFloors() {
+		try { const f = await getFloors(); floorList = f.floors ?? []; floorId = f.selected; activeFloor = f.active; } catch {}
+	}
+	async function doSaveOverlays(zones: any[], walls: any[]) {
+		if (floorId == null) return false;
+		toast('Sending zones to the robot…');
+		const r = await saveOverlays(floorId, zones, walls).catch(() => ({ ok: false, error: 'backend unreachable' }));
+		if (r.ok) toast.success('The robot confirmed the new zones'); else toast.error(r.error ?? 'Not saved');
+		await reloadVector(true);
+		return r.ok;
+	}
+	async function doSuggestion(id: string, action: 'apply' | 'dismiss') {
+		const r = await decideSuggestion(id, action).catch(() => ({ ok: false, error: 'backend unreachable' }));
+		if (!r.ok) toast.error(r.error ?? 'Failed'); else toast(action === 'apply' ? 'No-go zone added' : 'Suggestion dismissed');
+		await reloadVector(true);
+	}
+	async function switchFloor(id: number) {
+		floorId = id;
+		selected = new Set();
+		await selectFloor(id);
+		await reloadVector(true);
+	}
+
+	// The model's own suction and water levels (capabilities), with these as labels
+	const LEVEL_LABEL: Record<string, string> = {
+		closed: 'Off', gentle: 'Gentle', quiet: 'Quiet', normal: 'Normal', standard: 'Normal',
+		strong: 'Strong', max: 'Max', turbo: 'Turbo', low: 'Low', middle: 'Medium', high: 'High'
+	};
+	const levels = (vals: string[] | undefined, fallback: string[]) =>
+		(vals?.length ? vals : fallback).map((v) => ({ value: v, label: LEVEL_LABEL[v] ?? v }));
+	const SUCTION = $derived(levels(diag?.capabilities?.fan_levels, ['gentle', 'normal', 'strong', 'max']));
+	const WATER = $derived(levels(diag?.capabilities?.water_levels, ['closed', 'low', 'middle', 'high']));
+	const features = $derived(new Set((diag?.capabilities as any)?.features ?? []));
 	function suctionValue(v: string | null | undefined) {
 		const k = (v ?? '').toLowerCase();
-		if (['gentle', 'quiet'].includes(k)) return 'gentle';
-		if (['normal', 'standard'].includes(k)) return 'normal';
-		if (k === 'strong') return 'strong';
-		if (['max', 'turbo'].includes(k)) return 'max';
-		return 'gentle';
+		return SUCTION.some((o) => o.value === k) ? k : SUCTION[0]?.value;
 	}
 
 	const stateLabel: Record<string, string> = {
@@ -171,10 +199,11 @@
 
 	onMount(() => {
 		api.state().then((v) => (s = v));
-		const es = new EventSource('/api/events');
+		const es = new EventSource('api/events');
 		es.onmessage = (e) => { try { s = JSON.parse(e.data); } catch {} };
 		es.onerror = () => {};
 		refreshMap();
+		loadFloors();
 		diagnostics().then((v) => (diag = v)).catch(() => {});
 		const mapTimer = setInterval(() => reloadVector(), 8000);
 		const diagTimer = setInterval(() => diagnostics().then((v) => (diag = v)).catch(() => {}), 15000);
@@ -196,8 +225,8 @@
 				<Radar class="size-6" />
 			</div>
 			<div>
-				<h1 class="text-xl font-semibold">Subhiyya</h1>
-				<p class="text-sm text-muted-foreground">Philips HomeRun · XU7100</p>
+				<h1 class="text-xl font-semibold">{diag?.capabilities?.name || 'HomeRun'}</h1>
+				<p class="text-sm text-muted-foreground">Philips {diag?.capabilities?.model ?? 'HomeRun'}</p>
 			</div>
 		</div>
 		<div class="flex items-center gap-2">
@@ -266,7 +295,8 @@
 							<RotateCw class="size-4" /> Refresh
 						</button>
 					</div>
-					<MapView {vec} bind:selected
+					<MapView {vec} bind:selected floors={floorList} {floorId} onfloor={switchFloor}
+						{activeFloorName} onsaveoverlays={doSaveOverlays} onsuggestion={doSuggestion}
 						onrename={ctxRename} onmerge={ctxMerge} onunmerge={doUnmerge}
 						onsplit={ctxSplit} onunsplit={ctxUnsplit} oncleanroom={ctxCleanRoom} />
 
@@ -292,7 +322,7 @@
 						</div>
 						<div>
 							<div class="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><Droplets class="size-4" /> Water</div>
-							<Segment options={WATER} value={s?.water ?? 'middle'} onchange={(v) => { api.water(v); }} />
+							<Segment options={WATER} value={s?.water ?? WATER[0]?.value} onchange={(v) => { api.water(v); }} />
 						</div>
 					</div>
 
@@ -331,6 +361,8 @@
 						</div>
 					{/if}
 				</section>
+			{:else if tab === 'schedule'}
+				<div class="mt-6"><ScheduleTab /></div>
 			{:else if tab === 'care'}
 				<div class="mt-6">
 					<CareTab {diag} onToggle={doToggle} onEmpty={doEmpty} onMap={doMap} onDrive={doDrive} onVolume={doVolume} onLocate={() => cmd('locate')} />

@@ -1,0 +1,541 @@
+{
+  "_comment": "Generated from /v2.0/cloud/thing/{id}/model for product pwsggeyanmt3c41o on 2026-11-07. Edit '_model' to name the robot.",
+  "_model": "HomeRun XU2000",
+  "power": {
+    "dp": "1",
+    "code": "switch_go",
+    "type": "bool",
+    "access": "rw"
+  },
+  "pause": {
+    "dp": "2",
+    "code": "pause",
+    "type": "bool",
+    "access": "rw"
+  },
+  "return_home": {
+    "dp": "3",
+    "code": "switch_charge",
+    "type": "bool",
+    "access": "rw"
+  },
+  "mode": {
+    "dp": "4",
+    "code": "mode",
+    "type": "enum",
+    "access": "rw",
+    "values": [
+      "smart",
+      "zone",
+      "pose",
+      "part",
+      "chargego",
+      "wallfollow",
+      "selectroom"
+    ]
+  },
+  "status": {
+    "dp": "5",
+    "code": "status",
+    "type": "enum",
+    "access": "ro",
+    "values": [
+      "standby",
+      "smart",
+      "zone_clean",
+      "part_clean",
+      "cleaning",
+      "paused",
+      "goto_pos",
+      "pos_arrived",
+      "pos_unarrive",
+      "goto_charge",
+      "charging",
+      "charge_done",
+      "sleep",
+      "fault",
+      "wall_follow",
+      "direction_control",
+      "select_room",
+      "repositing",
+      "amicro_collect_dust",
+      "create_map",
+      "mapping"
+    ]
+  },
+  "clean_time": {
+    "dp": "6",
+    "code": "clean_time",
+    "type": "int",
+    "access": "ro",
+    "min": 0,
+    "max": 9999,
+    "unit": "min",
+    "scale": 0,
+    "step": 1
+  },
+  "clean_area": {
+    "dp": "7",
+    "code": "clean_area",
+    "type": "int",
+    "access": "ro",
+    "min": 0,
+    "max": 9999,
+    "unit": "\u33a1",
+    "scale": 0,
+    "step": 1
+  },
+  "battery": {
+    "dp": "8",
+    "code": "battery_percentage",
+    "type": "int",
+    "access": "ro",
+    "min": 0,
+    "max": 100,
+    "unit": "%",
+    "scale": 0,
+    "step": 1
+  },
+  "fan": {
+    "dp": "9",
+    "code": "suction",
+    "type": "enum",
+    "access": "rw",
+    "values": [
+      "closed",
+      "gentle",
+      "normal",
+      "strong",
+      "max"
+    ]
+  },
+  "water": {
+    "dp": "10",
+    "code": "cistern",
+    "type": "enum",
+    "access": "rw",
+    "values": [
+      "closed",
+      "low",
+      "middle",
+      "high"
+    ]
+  },
+  "locate": {
+    "dp": "11",
+    "code": "seek",
+    "type": "bool",
+    "access": "rw"
+  },
+  "direction": {
+    "dp": "12",
+    "code": "direction_control",
+    "type": "enum",
+    "access": "rw",
+    "values": [
+      "forward",
+      "backward",
+      "turn_left",
+      "turn_right",
+      "stop"
+    ]
+  },
+  "path_data": {
+    "dp": "14",
+    "code": "path_data",
+    "type": "raw",
+    "access": "rw"
+  },
+  "command_trans": {
+    "dp": "15",
+    "code": "command_trans",
+    "type": "raw",
+    "access": "rw"
+  },
+  "request": {
+    "dp": "16",
+    "code": "request",
+    "type": "enum",
+    "access": "rw",
+    "values": [
+      "get_map",
+      "get_path",
+      "get_both"
+    ]
+  },
+  "edge_brush_life": {
+    "dp": "17",
+    "code": "edge_brush_life",
+    "type": "int",
+    "access": "rw",
+    "min": 0,
+    "max": 9000,
+    "unit": "min",
+    "scale": 0,
+    "step": 1
+  },
+  "edge_brush_reset": {
+    "dp": "18",
+    "code": "edge_brush_life_reset",
+    "type": "bool",
+    "access": "rw"
+  },
+  "roll_brush_life": {
+    "dp": "19",
+    "code": "roll_brush_life",
+    "type": "int",
+    "access": "rw",
+    "min": 0,
+    "max": 18000,
+    "unit": "min",
+    "scale": 0,
+    "step": 1
+  },
+  "roll_brush_reset": {
+    "dp": "20",
+    "code": "roll_brush_life_reset",
+    "type": "bool",
+    "access": "rw"
+  },
+  "filter_life": {
+    "dp": "21",
+    "code": "filter_life",
+    "type": "int",
+    "access": "ro",
+    "min": 0,
+    "max": 9000,
+    "unit": "min",
+    "scale": 0,
+    "step": 1
+  },
+  "filter_reset": {
+    "dp": "22",
+    "code": "filter_reset",
+    "type": "bool",
+    "access": "rw"
+  },
+  "rag_life": {
+    "dp": "23",
+    "code": "rag_life",
+    "type": "int",
+    "access": "ro",
+    "min": 0,
+    "max": 9000,
+    "unit": "min",
+    "scale": 0,
+    "step": 1
+  },
+  "rag_reset": {
+    "dp": "24",
+    "code": "rag_life_reset",
+    "type": "bool",
+    "access": "rw"
+  },
+  "do_not_disturb": {
+    "dp": "25",
+    "code": "do_not_disturb",
+    "type": "bool",
+    "access": "rw"
+  },
+  "volume": {
+    "dp": "26",
+    "code": "volume_set",
+    "type": "int",
+    "access": "rw",
+    "min": 0,
+    "max": 100,
+    "unit": "%",
+    "scale": 0,
+    "step": 1
+  },
+  "break_clean": {
+    "dp": "27",
+    "code": "break_clean",
+    "type": "bool",
+    "access": "rw"
+  },
+  "fault": {
+    "dp": "28",
+    "code": "fault",
+    "type": "bitmap",
+    "access": "rw",
+    "maxlen": 30
+  },
+  "total_area": {
+    "dp": "29",
+    "code": "clean_area_total",
+    "type": "int",
+    "access": "ro",
+    "min": 0,
+    "max": 99999,
+    "unit": "\u33a1",
+    "scale": 0,
+    "step": 1
+  },
+  "total_count": {
+    "dp": "30",
+    "code": "clean_count_total",
+    "type": "int",
+    "access": "ro",
+    "min": 0,
+    "max": 99999,
+    "scale": 0,
+    "step": 1
+  },
+  "total_time": {
+    "dp": "31",
+    "code": "clean_time_total",
+    "type": "int",
+    "access": "ro",
+    "min": 0,
+    "max": 99999,
+    "unit": "min",
+    "scale": 0,
+    "step": 1
+  },
+  "device_timer": {
+    "dp": "32",
+    "code": "device_timer",
+    "type": "raw",
+    "access": "rw"
+  },
+  "disturb_time": {
+    "dp": "33",
+    "code": "disturb_time_set",
+    "type": "raw",
+    "access": "rw"
+  },
+  "device_info": {
+    "dp": "34",
+    "code": "device_info",
+    "type": "raw",
+    "access": "ro"
+  },
+  "voice_data": {
+    "dp": "35",
+    "code": "voice_data",
+    "type": "raw",
+    "access": "rw"
+  },
+  "language": {
+    "dp": "36",
+    "code": "language",
+    "type": "enum",
+    "access": "rw",
+    "values": [
+      "chinese_simplified",
+      "chinese_traditional",
+      "english",
+      "german",
+      "french",
+      "russian",
+      "spanish",
+      "korean",
+      "latin",
+      "portuguese",
+      "japanese",
+      "italian"
+    ]
+  },
+  "mop_state": {
+    "dp": "40",
+    "code": "mop_state",
+    "type": "enum",
+    "access": "ro",
+    "values": [
+      "none",
+      "installed"
+    ]
+  },
+  "work_mode": {
+    "dp": "41",
+    "code": "work_mode",
+    "type": "enum",
+    "access": "rw",
+    "values": [
+      "both_work",
+      "only_sweep",
+      "only_mop",
+      "intensive",
+      "quiet"
+    ]
+  },
+  "auto_boost": {
+    "dp": "45",
+    "code": "auto_boost",
+    "type": "bool",
+    "access": "rw"
+  },
+  "child_lock": {
+    "dp": "47",
+    "code": "child_lock",
+    "type": "bool",
+    "access": "rw"
+  },
+  "skip_room": {
+    "dp": "101",
+    "code": "skip_room",
+    "type": "bool",
+    "access": "wr"
+  },
+  "skip_room_state": {
+    "dp": "102",
+    "code": "skip_room_state",
+    "type": "enum",
+    "access": "ro",
+    "values": [
+      "skipping",
+      "skip_end"
+    ]
+  },
+  "sweep_count": {
+    "dp": "103",
+    "code": "clean_times",
+    "type": "enum",
+    "access": "rw",
+    "values": [
+      "1",
+      "2",
+      "5"
+    ]
+  },
+  "create_map": {
+    "dp": "104",
+    "code": "create_map",
+    "type": "bool",
+    "access": "rw"
+  },
+  "customize_mode": {
+    "dp": "105",
+    "code": "custom_mode_switch",
+    "type": "bool",
+    "access": "rw"
+  },
+  "map_num": {
+    "dp": "108",
+    "code": "map_num",
+    "type": "int",
+    "access": "ro",
+    "min": 0,
+    "max": 99,
+    "unit": "",
+    "scale": 0,
+    "step": 1
+  },
+  "map_id": {
+    "dp": "110",
+    "code": "map_id",
+    "type": "string",
+    "access": "ro"
+  },
+  "reserve_2": {
+    "dp": "111",
+    "code": "reserve_2",
+    "type": "bool",
+    "access": "rw"
+  },
+  "reserve_3": {
+    "dp": "112",
+    "code": "reserve_3",
+    "type": "bool",
+    "access": "rw"
+  },
+  "reserve_4": {
+    "dp": "113",
+    "code": "reserve_4",
+    "type": "int",
+    "access": "rw",
+    "min": 0,
+    "max": 200,
+    "unit": "",
+    "scale": 0,
+    "step": 1
+  },
+  "reserve_5": {
+    "dp": "114",
+    "code": "reserve_5",
+    "type": "enum",
+    "access": "rw",
+    "values": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12",
+      "13",
+      "14",
+      "15",
+      "16",
+      "17",
+      "18",
+      "19",
+      "20",
+      "21",
+      "22",
+      "23",
+      "24",
+      "25",
+      "26",
+      "27",
+      "28",
+      "29",
+      "30",
+      "31",
+      "32"
+    ]
+  },
+  "reserve_6": {
+    "dp": "115",
+    "code": "reserve_6",
+    "type": "string",
+    "access": "rw"
+  },
+  "reserve_7": {
+    "dp": "116",
+    "code": "reserve_7",
+    "type": "raw",
+    "access": "rw"
+  },
+  "reserve_8": {
+    "dp": "117",
+    "code": "reserve_8",
+    "type": "raw",
+    "access": "rw"
+  },
+  "exit_telecontrol_unseen": {
+    "dp": "134",
+    "code": "exit_telecontrol_unseen",
+    "type": "bool",
+    "access": "wr"
+  },
+  "dormant_keep_unseen": {
+    "dp": "184",
+    "code": "dormant_keep_unseen",
+    "type": "string",
+    "access": "ro"
+  },
+  "mop_seated": {
+    "dp": "197",
+    "code": "mop_seated",
+    "type": "bool",
+    "access": "ro"
+  },
+  "msg_push_unseen": {
+    "dp": "199",
+    "code": "msg_push_unseen",
+    "type": "int",
+    "access": "rw",
+    "min": 0,
+    "max": 255,
+    "unit": "",
+    "scale": 0,
+    "step": 1
+  }
+}

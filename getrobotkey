@@ -26,6 +26,10 @@ try:
     if m and m.get("key"):
         out["local_key"] = m["key"]
         out["name"] = m.get("name","")
+        out["product_id"] = m.get("product_id","")
+        # newer HomeRun firmware may speak 3.4/3.5; the wizard records which
+        if m.get("version"):
+            out["version"] = float(m["version"])
         json.dump(out, open("robot_secrets.json","w"), indent=2)
         print("\n[OK] wrote robot_secrets.json — local_key captured:", m["key"][:4]+"…")
     else:

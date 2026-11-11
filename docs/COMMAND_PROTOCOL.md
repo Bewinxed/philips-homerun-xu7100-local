@@ -158,3 +158,32 @@ The official pack:
 Building a ZIP with those exact filenames + audio format, served at a `.zip` URL,
 **activates correctly** — VERIFIED (robot spoke the custom clip on every prompt).
 Valid languageId range is ~8..30 on this model (42 was rejected outright).
+
+## Schedules — DP 32 `device_timer` (0xAB family, cmd 0x31 report / 0x30 set) — VERIFIED on an XU2000
+
+```
+ab 00000000 | len | cmd | data | chk      len = len(cmd + data), chk = sum(cmd + data) & 0xFF
+data = 0x01 (version)  0x08 (max)  count  schedule * count
+schedule = status days hour minute 0x00 type nRooms [room * nRooms | settings(11)]
+  status  1 = on, 0 = off, 2 = belongs to another map (the app shows it disabled)
+  days    bit 0 = Monday ... bit 6 = Sunday   (0x02 shows as Tuesday in the app)
+  type    0 = whole floor the robot is on (nRooms 0, one settings block), 1 = rooms
+  room    id(1) + settings(11)
+settings = mode repeat order 00 00 suction water FF FF FF FF
+  mode    work_mode:  0 both_work (vacuum + mop), 1 only_sweep, 2 only_mop, 3 intensive, 4 quiet
+  repeat  index into clean_times [1, 2, 5]   (1x = 0 and 2x = 1 verified against the app)
+  order   position of the room in a room schedule (0 for whole floor)
+  suction 0 closed, 1 gentle, 2 normal, 3 strong, 4 max
+  water   cistern: 0 closed, 1 low, 2 middle, 3 high
+```
+
+Verified against the app: a whole-floor schedule set to Vacuüm / Sterk / 1x in the
+app reports `01 00 00 00 00 03 00 ff ff ff ff`.
+
+Writing cmd 0x30 with this layout (base64, like DP 15) replaces the schedules; the
+robot reports them back on DP 32 within a second or two. Verified: deleting
+schedules, switching one off and on, adding and deleting a whole-floor schedule.
+
+## Zones and walls — DP 15, cmd 0x39 / 0x49 report, 0x38 / 0x48 set — VERIFIED on an XU2000
+
+See backend/frames.py. The XU2000 only acts on base64 values; hex is ignored.

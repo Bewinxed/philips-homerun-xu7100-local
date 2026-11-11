@@ -2,6 +2,7 @@
 
 Endpoints:
   GET  /api/state          -> current semantic state (json)
+  GET  /api/capabilities   -> what this model supports (fan/water levels, features)
   GET  /api/events         -> SSE stream, pushes state on change
   POST /api/command        -> {"action": "start|pause|stop|home|locate"}
   POST /api/fan            -> {"level": "..."}
@@ -25,6 +26,27 @@ from flask import Flask, jsonify, request, Response, send_from_directory
 from controller import make_controller
 
 controller = make_controller()
+
+
+def _cfg():
+    for name in ("config.json", "robot_secrets.json"):
+        try:
+            with open(os.path.join(ROOT, name)) as f:
+                yield json.load(f)
+        except Exception:
+            yield {}
+
+
+_config, _secrets = _cfg()
+
+# Stuck watchdog (watchdog.py): frees the robot, learns no-go zones, notifies
+from notifier import Notifier
+from watchdog import Watchdog
+
+watchdog = Watchdog(controller, Notifier(_config.get("notify_targets")),
+                    _config.get("watchdog"), robot_name=_secrets.get("name") or "The robot")
+if controller.source == "robot":
+    watchdog.start()
 
 # background poller pushes state to SSE subscribers
 _subs: "list[queue.Queue]" = []
@@ -62,13 +84,28 @@ DIST = os.path.join(ROOT, "web", "dist")
 STATIC = os.path.join(ROOT, "web", "static")
 
 
+# Who may call /api (access.py): trusted networks or the API token; CORS only
+# for configured origins.
+from access import Access
+
+access = Access(_config)
+
+
+@app.before_request
+def _check_access():
+    if not request.path.startswith("/api/"):
+        return None   # the web UI's files; its API calls are checked
+    if request.method == "OPTIONS":
+        return Response(status=204, headers=access.cors_headers(request))
+    if not access.allowed(request):
+        return jsonify({"ok": False, "error": "unauthorized: send the API token"}), 401
+    return None
+
+
 @app.after_request
 def _cors(resp):
-    # LAN tool: let the Home Assistant custom Lovelace card (served from :8123)
-    # call this backend on :8787 from the browser.
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    for k, v in access.cors_headers(request).items():
+        resp.headers[k] = v
     return resp
 
 
@@ -80,9 +117,118 @@ def api_state():
 @app.get("/api/diagnostics")
 def api_diagnostics():
     try:
-        return jsonify(controller.diagnostics())
+        d = controller.diagnostics()
+        if "device_timer" in d.get("capabilities", {}).get("features", []):
+            d["schedules"] = _public_schedules()
+        try:   # cached cloud listing; lets the HA floor select follow changes
+            from stored_map import floors, current_floor_id
+            d["floors"] = {"floors": floors(), "selected": current_floor_id()}
+        except Exception:
+            pass
+        return jsonify(d)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ---- cleaning schedules (DP 32, schedule.py) -----------------------------------
+def _public_schedules():
+    """The schedules without the robot's raw room/settings bytes."""
+    import schedule
+    out = []
+    for i, s in enumerate(controller.schedules().get("schedules") or []):
+        out.append({"index": i, "enabled": s["enabled"], "days": s["days"], "time": s["time"],
+                    "whole_floor": s["whole_floor"], "other_map": s["status"] == 2,
+                    "rooms": [r["id"] for r in s.get("rooms", [])],
+                    **{f: s.get(f) for f in schedule.SETTING_FIELDS}})
+    return out
+
+
+def _change_schedules(change):
+    """Apply change(list) to the robot's current schedules and write them back."""
+    import copy
+    cur = copy.deepcopy(controller.schedules(max_age=120).get("schedules") or [])
+    new = change(cur)
+    if not controller.set_schedules(new):
+        return jsonify({"ok": False, "error": "the robot did not confirm the schedules"}), 502
+    return jsonify({"ok": True, "schedules": _public_schedules()})
+
+
+def _edit_fields(s, b):
+    import schedule
+    if "enabled" in b:
+        s["enabled"] = bool(b["enabled"])
+    if "days" in b:
+        days = b["days"].split(",") if isinstance(b["days"], str) else b["days"]
+        schedule.list_to_days([d for d in days if str(d).strip()])   # validates
+        s["days"] = [str(d).strip()[:3].lower() for d in days if str(d).strip()]
+    if "time" in b:
+        hh, mm = (int(x) for x in str(b["time"]).split(":")[:2])
+        if not (0 <= hh < 24 and 0 <= mm < 60):
+            raise ValueError(f"bad time {b['time']}")
+        s["time"] = f"{hh:02d}:{mm:02d}"
+    # cleaning settings: mode, repeat (1/2/5), suction, water
+    schedule.apply_settings(s, {f: b[f] for f in schedule.SETTING_FIELDS if f in b})
+    return s
+
+
+@app.get("/api/schedules")
+def api_schedules():
+    d = controller.schedules()
+    return jsonify({"ok": True, "max": d.get("max"), "schedules": _public_schedules()})
+
+
+@app.post("/api/schedules/<int:index>")
+def api_schedule_edit(index):
+    """body: any of {"enabled": bool, "days": ["mon", ...] | "mon,wed", "time": "HH:MM",
+    "mode": both_work|only_sweep|only_mop|intensive|quiet, "repeat": 1|2|5,
+    "suction": closed|gentle|normal|strong|max, "water": closed|low|middle|high}"""
+    b = request.json or {}
+
+    def change(cur):
+        if not 0 <= index < len(cur):
+            raise IndexError(f"no schedule {index}")
+        _edit_fields(cur[index], b)
+        return cur
+    try:
+        return _change_schedules(change)
+    except (IndexError, ValueError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.post("/api/schedules/add")
+def api_schedule_add():
+    """body: {"days": [...], "time": "HH:MM", "enabled": true, + the settings of
+    POST /api/schedules/<index>} - cleans the whole floor the robot is on, like a
+    schedule made in the app; settings default to the app's (vacuum, strong, 1x)."""
+    import schedule
+    b = request.json or {}
+
+    def change(cur):
+        s = _edit_fields({"enabled": True, "days": [], "time": "09:00", "whole_floor": True,
+                          "settings": schedule.DEFAULT_SETTINGS.hex()}, b)
+        return cur + [s]
+    try:
+        return _change_schedules(change)
+    except (IndexError, ValueError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.delete("/api/schedules/<int:index>")
+@app.post("/api/schedules/<int:index>/delete")   # for clients limited to GET/POST
+def api_schedule_delete(index):
+    def change(cur):
+        if not 0 <= index < len(cur):
+            raise IndexError(f"no schedule {index}")
+        return cur[:index] + cur[index + 1:]
+    try:
+        return _change_schedules(change)
+    except (IndexError, ValueError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.get("/api/capabilities")
+def api_capabilities():
+    return jsonify(controller.capabilities())
 
 
 @app.get("/api/events")
@@ -198,9 +344,12 @@ def api_language():
 
 @app.post("/api/empty")
 def api_empty():
-    """DP 38 dust_collection_switch — tell the base to empty the bin."""
-    controller.set_dp("38", True)
-    return jsonify({"ok": True})
+    """dust_collection_switch — tell the base to empty the bin."""
+    try:
+        controller.empty_bin()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.post("/api/dp")
@@ -253,23 +402,26 @@ _route_cache = {"ts": 0, "data": None}
 def api_map_vector():
     """Vector map: per-room outlines, labels, areas, settings, walls, charger."""
     force = request.args.get("force") == "1"
-    if not force and _vec_cache["data"] and time.time() - _vec_cache["ts"] < 120:
-        data = _vec_cache["data"]
+    from stored_map import current_floor_id
+    want = current_floor_id()
+    cached = _vec_cache["data"]
+    if (not force and cached and cached.get("floor_id") == want
+            and time.time() - _vec_cache["ts"] < 120):
+        data = cached
     else:
         try:
-            import glob
             from map_vector import build
-            from stored_map import render_latest, STORE
-            files = sorted(glob.glob(os.path.join(STORE, "*_robot_map.bin")))
-            if not files:
-                render_latest()
-                files = sorted(glob.glob(os.path.join(STORE, "*_robot_map.bin")))
-            if not files:
+            from stored_map import current_map_bytes
+            rb, floor = current_map_bytes()
+            if not rb:
                 return jsonify({"ok": False, "error": "no stored map yet"}), 404
             import room_overrides
-            with open(files[-1], "rb") as f:
-                data = build(f.read(), splits=room_overrides.get_splits())
-            _vec_cache.update(ts=time.time(), data=data)
+            data = build(rb, splits=room_overrides.get_splits())
+            data["floor"] = floor["name"]
+            data["floor_id"] = floor["id"]
+            # a floor switch during the build: don't cache the old floor's map
+            if current_floor_id() == floor["id"]:
+                _vec_cache.update(ts=time.time(), data=data)
         except Exception as e:
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
     out = dict(data)
@@ -281,7 +433,8 @@ def api_map_vector():
             from stored_map import latest_route
             _route_cache.update(ts=time.time(), data=latest_route())
         r = _route_cache["data"] or {}
-        if r.get("points"):
+        # the last run may have been on another floor
+        if r.get("points") and r.get("map_id", out.get("map_id")) == out.get("map_id"):
             out["path"] = r["points"]
             out["robot_px"] = r["last"]
             out["route_info"] = {"points": r.get("count"), "at": r.get("at"),
@@ -296,7 +449,141 @@ def api_map_vector():
         out["rooms"] = room_overrides.apply(list(out.get("rooms", [])))
     except Exception:
         pass
+    # On the floor the robot is on, its live zones/walls are fresher than the
+    # stored map, which the cloud only updates after the robot uploads it.
+    try:
+        act = _active_floor()
+        out["active"] = bool(act and act["id"] == out.get("floor_id"))
+        if out["active"]:
+            from stored_map import with_px
+            hdr = {"origin_x": out["origin"][0], "origin_y": out["origin"][1]}
+            live = controller.live_overlays()
+            fresh = with_px(live, hdr)
+            if live.get("zones") is not None:
+                out["no_go_zones"] = fresh["no_go_zones"]
+            if live.get("walls") is not None:
+                out["virtual_walls"] = fresh["virtual_walls"]
+    except Exception as e:
+        out["active_error"] = str(e)
+    snap = watchdog.snapshot(out.get("floor_id"))
+    out["stuck"] = [{"px": i["px"], "exact": i.get("exact"), "ts": i["ts"], "recovered": i["recovered"]}
+                    for i in snap["incidents"] if i.get("px")]
+    out["suggested_zones"] = [s for s in snap["suggestions"] if s["status"] == "suggested"]
     return jsonify(out)
+
+
+_active_cache = {"ts": 0.0, "key": None, "floor": None}
+
+
+def _active_floor():
+    """The floor the robot is on (its live zones/walls match that stored map)."""
+    try:
+        controller.refresh_overlays()
+    except Exception:
+        pass
+    live = controller.live_overlays()
+    key = json.dumps([live.get("zones"), live.get("walls")])
+    if key != _active_cache["key"] or time.time() - _active_cache["ts"] > 600:
+        from stored_map import active_floor
+        _active_cache.update(ts=time.time(), key=key, floor=active_floor(live))
+    return _active_cache["floor"]
+
+
+@app.get("/api/floors")
+def api_floors():
+    """Stored maps, one per floor, and which one the map views show."""
+    try:
+        from stored_map import floors, selected_floor
+        fl = floors()
+        sel = selected_floor()
+        if sel not in {f["id"] for f in fl}:
+            sel = max(fl, key=lambda f: f.get("time") or 0)["id"] if fl else None
+        act = _active_floor()
+        return jsonify({"ok": True, "floors": fl, "selected": sel, "active": act["id"] if act else None})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/floors/select")
+def api_floors_select():
+    """Choose which floor's map to show. Only changes our view, not the robot."""
+    try:
+        from stored_map import select_floor
+        select_floor((request.json or {})["id"])
+        _vec_cache.update(ts=0, data=None)
+        _map_cache.update(ts=0)
+        import map_render
+        map_render._cache.update(ts=0.0, png=None)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.get("/api/overlays")
+def api_overlays():
+    """The robot's live no-go zones and virtual walls (command coordinates)."""
+    act = _active_floor()
+    return jsonify({"ok": True, **controller.live_overlays(), "active_floor": act["id"] if act else None})
+
+
+@app.post("/api/overlays")
+def api_overlays_set():
+    """Replace the robot's no-go zones and/or virtual walls on the floor it is on.
+
+    body: {"floor": id, "zones": [{"mode": 0|2, "px": [[x, y], ...]}], "walls": [{"px": [x1, y1, x2, y2]}]}
+    Pixel coordinates of that floor's map. Refused while a job runs or when the
+    robot is on another floor (it only accepts zones for the map it has loaded)."""
+    b = request.json or {}
+    from stored_map import floors, floor_map_bytes, parse_header, px_to_cmd, invalidate_floors
+    act = _active_floor()
+    if not act or act["id"] != b.get("floor"):
+        return jsonify({"ok": False, "error": "the robot is not on this floor; edit the floor it is on"}), 409
+    fl = next(f for f in floors() if f["id"] == act["id"])
+    hdr = parse_header(floor_map_bytes(fl))
+    zones = walls = None
+    if "zones" in b:
+        zones = [{"mode": 2 if int(z.get("mode", 0)) == 2 else 0,
+                  "cmd": [px_to_cmd(hdr, x, y) for x, y in z["px"]]} for z in b["zones"]]
+    if "walls" in b:
+        walls = [{"cmd": [px_to_cmd(hdr, w["px"][0], w["px"][1]), px_to_cmd(hdr, w["px"][2], w["px"][3])]}
+                 for w in b["walls"]]
+    # check and write under the job lock: no job can start in between
+    with controller.job_lock:
+        if controller.state()["state"] in ("cleaning", "returning", "paused"):
+            return jsonify({"ok": False, "error": "the robot is busy; edit zones while it is docked or idle"}), 409
+        res = controller.set_overlays(zones=zones, walls=walls)
+    _vec_cache.update(ts=0, data=None)
+    _active_cache.update(key=None)
+    invalidate_floors()
+    ok = bool(res) and all(res.values())
+    return jsonify({"ok": ok, "confirmed": res,
+                    **({} if ok else {"error": "the robot did not confirm the change"})}), (200 if ok else 502)
+
+
+@app.get("/api/watchdog")
+def api_watchdog():
+    return jsonify({"ok": True, **watchdog.snapshot()})
+
+
+@app.post("/api/watchdog/test-notify")
+def api_watchdog_test_notify():
+    """Send a test notification the way the watchdog would; returns who it reached."""
+    n = watchdog.n
+    if not n.available:
+        return jsonify({"ok": False, "error": "no Home Assistant API (only inside the app)"}), 400
+    who = n.send(f"{watchdog.name_}: test", "This is how a stuck robot is reported.", tag="homerun_test")
+    return jsonify({"ok": True, "reached": who})
+
+
+@app.post("/api/watchdog/suggestion")
+def api_watchdog_suggestion():
+    b = request.json or {}
+    try:
+        s = watchdog.decide(b.get("id"), b.get("action"))
+        _vec_cache.update(ts=0, data=None)
+        return jsonify({"ok": True, "suggestion": s})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.post("/api/rooms/clean")

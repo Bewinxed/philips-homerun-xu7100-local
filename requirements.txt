@@ -1,2 +1,5 @@
 flask>=3.0
 tinytuya>=1.13
+requests>=2.31
+tuya-vacuum>=0.1
+Pillow>=10.0

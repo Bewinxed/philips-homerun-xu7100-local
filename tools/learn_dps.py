@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Learn the real DP schema of THIS robot. Two modes:
+"""Learn the real DP schema of THIS robot. Three modes:
 
+  model  : pull the device's cloud thing model and write backend/models/<product_id>.json,
+           which the controller then uses instead of the XU7100 defaults
   spec   : derive semantic mapping from the cloud DP specification (device_specs.json)
   live   : connect over LAN, poll DPs, and (optionally) watch values change while
            you press buttons in the app, to confirm which DP is which.
 
+    .venv/bin/python tools/learn_dps.py model
     .venv/bin/python tools/learn_dps.py spec
     .venv/bin/python tools/learn_dps.py live
 """
@@ -67,6 +70,47 @@ def learn_spec():
     print("Review it, then copy the good bits into backend/dp_schema.json")
 
 
+def learn_model():
+    from tuya_cloud import TuyaCloud, load_cfg
+    import schema
+    cfg = load_cfg()
+    secrets = {}
+    p = os.path.join(ROOT, "robot_secrets.json")
+    if os.path.exists(p):
+        secrets = json.load(open(p))
+    did = cfg["device_id"]
+    c = TuyaCloud(cfg)
+    det = c.device_detail(did)
+    if not det.get("success"):
+        sys.exit(f"device detail failed: {det.get('code')} {det.get('msg')}")
+    pid = det["result"].get("product_id")
+    model = det["result"].get("model")
+    r = c.thing_model(did)
+    if not r.get("success"):
+        sys.exit(f"thing model failed: {r.get('code')} {r.get('msg')}")
+    sch = schema.from_thing_model(r["result"])
+    os.makedirs(schema.MODELS, exist_ok=True)
+    try:
+        out = schema.model_path(pid)   # the id comes from the cloud: no paths
+    except ValueError as e:
+        sys.exit(str(e))
+    doc = {"_comment": f"Generated from /v2.0/cloud/thing/{{id}}/model for product {pid} "
+                       f"on {time.strftime('%Y-%m-%d')}. Edit '_model' to name the robot."}
+    doc["_model"] = f"HomeRun {model}" if model else pid
+    doc.update(sch)
+    json.dump(doc, open(out, "w"), indent=2)
+    print(f"{len(sch)} datapoints\n")
+    for name, e in sorted(sch.items(), key=lambda kv: int(kv[1]["dp"])):
+        extra = e.get("values") or (f"{e.get('min')}..{e.get('max')}" if "max" in e else "")
+        known = "" if e["code"] in schema.CODE_TO_SEMANTIC else "   (unmapped)"
+        print(f"  DP {e['dp']:>4}  {name:<18} {e['code']:<26} {e.get('type',''):<7} {extra}{known}")
+    print(f"\n[OK] wrote {out}")
+    if secrets and secrets.get("product_id") != pid:
+        secrets["product_id"] = pid
+        json.dump(secrets, open(p, "w"), indent=2)
+        print("     (added product_id to robot_secrets.json so the controller picks it up)")
+
+
 def learn_live():
     secrets = os.path.join(ROOT, "robot_secrets.json")
     if not os.path.exists(secrets):
@@ -94,4 +138,4 @@ def learn_live():
 
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "spec"
-    (learn_live if mode == "live" else learn_spec)()
+    {"live": learn_live, "model": learn_model}.get(mode, learn_spec)()

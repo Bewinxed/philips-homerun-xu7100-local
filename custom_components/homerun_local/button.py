@@ -23,16 +23,17 @@ class HomeRunButtonDescription(ButtonEntityDescription):
     """A button and the client coroutine it triggers."""
 
     press_fn: Callable[[HomeRunApiClient], Coroutine[Any, Any, None]]
+    feature: str | None = None  # backend schema name the model must have
 
 
 BUTTONS: tuple[HomeRunButtonDescription, ...] = (
     HomeRunButtonDescription(
         key="empty_bin", translation_key="empty_bin", icon="mdi:delete-empty",
-        press_fn=lambda c: c.async_empty_bin(),
+        press_fn=lambda c: c.async_empty_bin(), feature="dust_collect",
     ),
     HomeRunButtonDescription(
         key="start_mapping", translation_key="start_mapping", icon="mdi:map-search",
-        press_fn=lambda c: c.async_start_mapping(),
+        press_fn=lambda c: c.async_start_mapping(), feature="create_map",
     ),
     HomeRunButtonDescription(
         key="locate", translation_key="locate", icon="mdi:map-marker-radius",
@@ -48,8 +49,14 @@ async def async_setup_entry(
 ) -> None:
     """Set up the action buttons."""
     coordinator = entry.runtime_data
+    caps = coordinator.diagnostics.get("capabilities")
+    features = set(caps.get("features") or []) if caps else None
     async_add_entities(
-        HomeRunButton(coordinator, entry, description) for description in BUTTONS
+        HomeRunButton(coordinator, entry, description)
+        for description in BUTTONS
+        # older backends report no capabilities: keep every button
+        if features is None or description.feature is None
+        or description.feature in features
     )
 
 

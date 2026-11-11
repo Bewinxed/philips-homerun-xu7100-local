@@ -43,8 +43,27 @@ def list_maps(file_type="collect_recode", page_size=20):
     return r.get("result", {}).get("datas", []) or []
 
 
-def download_map(map_id):
-    """Return {'app_map': bytes|None, 'robot_map': bytes|None} for a record id."""
+def _store_path(map_id, key, stamp=None):
+    # The cloud updates a floor's record in place (same id, new time) when its
+    # zones or rooms change, so cached copies are keyed by upload time too.
+    return os.path.join(STORE, f"{map_id}_{stamp}_{key}.bin" if stamp else f"{map_id}_{key}.bin")
+
+
+_download_locks: dict = {}
+_download_locks_guard = __import__("threading").Lock()
+
+
+def download_map(map_id, stamp=None):
+    """Return {'app_map': bytes|None, 'robot_map': bytes|None} for a record id.
+    Downloads of one record run one at a time, so an older one can't remove the
+    files of a newer one that finished first."""
+    with _download_locks_guard:
+        lock = _download_locks.setdefault(str(map_id), __import__("threading").Lock())
+    with lock:
+        return _download_map(map_id, stamp)
+
+
+def _download_map(map_id, stamp=None):
     c, did = _cloud()
     r = c.get(f"/v1.0/users/sweepers/file/{did}/download?id={map_id}")
     if not r.get("success"):
@@ -58,9 +77,18 @@ def download_map(map_id):
             out[key] = None
             continue
         blob = requests.get(url, timeout=30).content   # pre-signed, no auth
-        with open(os.path.join(STORE, f"{map_id}_{key}.bin"), "wb") as f:
+        with open(_store_path(map_id, key, stamp), "wb") as f:
             f.write(blob)
         out[key] = blob
+    if stamp:   # drop older copies of this record (never newer ones)
+        for name in os.listdir(STORE):
+            parts = name.split("_")
+            if (name.startswith(f"{map_id}_") and len(parts) > 2 and parts[1].isdigit()
+                    and int(parts[1]) < int(stamp)):
+                try:
+                    os.remove(os.path.join(STORE, name))
+                except OSError:
+                    pass
     return out
 
 
@@ -116,7 +144,7 @@ def latest_route():
         return {"error": f"route parse failed: {type(e).__name__}: {e}"}
     if not pts:
         return {"error": "route decoded to zero points"}
-    return {"points": pts, "last": pts[-1], "count": len(pts),
+    return {"points": pts, "last": pts[-1], "count": len(pts), "map_id": hdr["map_id"],
             "record_id": rec["id"], "at": rec.get("time")}
 
 
@@ -133,21 +161,161 @@ def parse_header(b):
     }
 
 
+def split_robot_map(b):
+    """(layout, overlay_trailer). The XU2000 appends its virtual walls and no-go
+    zones after the LZ4 block; tuya_vacuum reads to the end of the buffer, so
+    the layout must be cut at header + compressed_length before parsing."""
+    end = 24 + parse_header(b)["compressed_length"]
+    return b[:end], b[end:]
+
+
+def cmd_to_px(hdr, x, y):
+    """Command coordinate -> map pixel (docs/COMMAND_PROTOCOL.md)."""
+    return [round((x + hdr["origin_x"]) / 10.0, 1), round((hdr["origin_y"] - y) / 10.0, 1)]
+
+
+def px_to_cmd(hdr, px, py):
+    return [int(round(px * 10 - hdr["origin_x"])), int(round(hdr["origin_y"] - py * 10))]
+
+
+def with_px(ov, hdr):
+    """frames.overlays() result -> the vector map's no_go_zones / virtual_walls."""
+    zones = [{"mode": z["mode"], "cmd": z["cmd"], "px": [cmd_to_px(hdr, *p) for p in z["cmd"]]}
+             for z in ov.get("zones") or []]
+    walls = [{"cmd": w["cmd"][0] + w["cmd"][1],
+              "px": cmd_to_px(hdr, *w["cmd"][0]) + cmd_to_px(hdr, *w["cmd"][1])}
+             for w in ov.get("walls") or []]
+    return {"no_go_zones": zones, "virtual_walls": walls}
+
+
+def parse_overlays(trailer, hdr):
+    """Decode the 0xAA command frames stored after the map body (frames.py):
+    virtual walls (0x49) and no-go zones (0x39, mode 0 no-go / 2 no-mop), with
+    pixel copies for drawing."""
+    import frames
+    out = with_px(frames.overlays(trailer), hdr)
+    out["unknown_cmds"] = [c for c, _ in frames.parse(trailer)
+                           if c not in (frames.ZONES_GET, frames.WALLS_GET)]
+    return out
+
+
+def same_overlays(stored, live):
+    """stored has the same zones and walls as live (comparing only what live reports)."""
+    def zones(ov):
+        return sorted((z["mode"], tuple(map(tuple, z["cmd"]))) for z in ov.get("zones") or [])
+
+    def walls(ov):
+        return sorted(tuple(map(tuple, w["cmd"])) for w in ov.get("walls") or [])
+    return ((live.get("zones") is None or zones(stored) == zones(live))
+            and (live.get("walls") is None or walls(stored) == walls(live)))
+
+
+# ---- floors -----------------------------------------------------------------
+# Multi-floor robots keep one stored map per floor. The cloud keeps older uploads
+# of the same floor too (e.g. renamed ones), all sharing the robot's file slot in
+# `extend` (/tmp/mm_map_<slot>_1.bin) — the newest upload per slot wins.
+FLOOR_FILE = os.path.join(ROOT, "maps", "floor.json")
+_floor_cache = {"ts": 0.0, "data": None}
+
+
+def invalidate_floors():
+    _floor_cache.update(ts=0.0)
+
+
+def floors(max_age=600):
+    """Cached: every map view needs this, and the Tuya IoT API quota is small."""
+    if _floor_cache["data"] is not None and time.time() - _floor_cache["ts"] < max_age:
+        return _floor_cache["data"]
+    by_slot = {}
+    for m in list_maps():
+        slot = m.get("extend") or str(m["id"])
+        if slot not in by_slot or m.get("time", 0) > by_slot[slot].get("time", 0):
+            by_slot[slot] = m
+    data = sorted(({"id": m["id"], "name": m.get("file_name") or str(m["id"]),
+                    "time": m.get("time")} for m in by_slot.values()),
+                  key=lambda f: f["name"])
+    _floor_cache.update(ts=time.time(), data=data)
+    return data
+
+
+def selected_floor():
+    try:
+        with open(FLOOR_FILE) as f:
+            return json.load(f).get("id")
+    except Exception:
+        return None
+
+
+def select_floor(map_id):
+    os.makedirs(os.path.dirname(FLOOR_FILE), exist_ok=True)
+    with open(FLOOR_FILE, "w") as f:
+        json.dump({"id": int(map_id)}, f)
+
+
+def current_floor_id():
+    """The floor the map views show: the selected one, else the newest upload."""
+    sel = selected_floor()
+    fl = floors()
+    if any(f["id"] == sel for f in fl):
+        return sel
+    return max(fl, key=lambda f: f.get("time") or 0)["id"] if fl else None
+
+
+def current_map_bytes():
+    """robot_map bytes of the selected floor (newest upload if none chosen),
+    downloading it if it isn't cached yet. Returns (bytes, floor) or (None, None)."""
+    fl = floors()
+    if not fl:
+        return None, None
+    sel = selected_floor()
+    floor = next((f for f in fl if f["id"] == sel), None) \
+        or max(fl, key=lambda f: f.get("time") or 0)
+    return floor_map_bytes(floor), floor
+
+
+def floor_map_bytes(floor):
+    """robot_map bytes of one floor, downloading it when this upload isn't cached."""
+    path = _store_path(floor["id"], "robot_map", floor.get("time"))
+    if not os.path.exists(path):
+        download_map(floor["id"], floor.get("time"))
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
+def active_floor(live):
+    """The floor whose stored zones and walls match what the robot reports live
+    (frames.overlays() of DP 15), or None when there is no unambiguous match."""
+    import frames
+    if not live or (live.get("zones") is None and live.get("walls") is None):
+        return None
+    hits = []
+    for fl in floors():
+        b = floor_map_bytes(fl)
+        if b and same_overlays(frames.overlays(split_robot_map(b)[1]), live):
+            hits.append(fl)
+    if len(hits) == 1:
+        return hits[0]
+    # Several floors look the same (e.g. none has zones or walls): prefer the
+    # floor that is shown, otherwise it can't be told which one the robot is on.
+    sel = current_floor_id() if hits else None
+    return next((f for f in hits if f["id"] == sel), None)
+
+
 def render_latest(save_png=True):
-    """Grab the newest stored map, decode it, write web/static/map.png."""
-    maps = list_maps()
-    if not maps:
+    """Grab the selected floor's stored map, decode it, write web/static/map.png."""
+    rb, floor = current_map_bytes()
+    if not floor:
         return {"ok": False, "error": "no stored maps"}
-    newest = max(maps, key=lambda m: m.get("time", 0))
-    blobs = download_map(newest["id"])
-    rb = blobs.get("robot_map")
     if not rb:
         return {"ok": False, "error": "record has no robot_map"}
 
     hdr = parse_header(rb)
     meta = {
-        "ok": True, "map_id": newest["id"], "saved_at": newest.get("time"),
-        "extend": newest.get("extend"), "maps_available": len(maps),
+        "ok": True, "map_id": floor["id"], "floor": floor["name"],
+        "saved_at": floor.get("time"), "floors": floors(),
         "width": hdr["width"], "height": hdr["height"],
         "resolution_mm": hdr["resolution_cm"] * 10,
         "size_m": [round(hdr["width"] * hdr["resolution_cm"] / 100, 2),
@@ -158,7 +326,7 @@ def render_latest(save_png=True):
 
     try:
         from tuya_vacuum.map.layout import Layout
-        lay = Layout(rb)
+        lay = Layout(split_robot_map(rb)[0])
         meta["rooms"] = [{"id": r.id, "name": getattr(r, "name", "")} for r in lay.rooms]
         if save_png:
             os.makedirs(STATIC, exist_ok=True)

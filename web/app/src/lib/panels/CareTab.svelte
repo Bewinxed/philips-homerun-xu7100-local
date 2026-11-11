@@ -14,6 +14,7 @@
 		onVolume: (v: number) => void;
 		onLocate: () => void;
 	} = $props();
+	const features = $derived(new Set<string>(diag?.capabilities?.features ?? []));
 
 	const TOGGLE_SUB: Record<string, string> = {
 		auto_boost: 'Ramp up suction on rugs',
@@ -40,15 +41,20 @@
 
 <div class="flex flex-col gap-5">
 	<!-- utilities -->
+	<!-- only what this model has (capabilities); everything while they're unknown -->
 	<div class="grid grid-cols-2 gap-3" in:rise={{ delay: 40 }}>
-		<button class="bigtile" onclick={onEmpty}>
-			<Trash2 class="size-5 text-primary" />
-			<div><p class="text-sm font-medium">Empty the bin</p><p class="text-xs text-muted-foreground">run the base now</p></div>
-		</button>
-		<button class="bigtile" onclick={onMap}>
-			<Radar class="size-5 text-primary" />
-			<div><p class="text-sm font-medium">Map the home</p><p class="text-xs text-muted-foreground">fresh scan, no clean</p></div>
-		</button>
+		{#if !features.size || features.has('dust_collect')}
+			<button class="bigtile" onclick={onEmpty}>
+				<Trash2 class="size-5 text-primary" />
+				<div><p class="text-sm font-medium">Empty the bin</p><p class="text-xs text-muted-foreground">run the base now</p></div>
+			</button>
+		{/if}
+		{#if !features.size || features.has('create_map')}
+			<button class="bigtile" onclick={onMap}>
+				<Radar class="size-5 text-primary" />
+				<div><p class="text-sm font-medium">Map the home</p><p class="text-xs text-muted-foreground">fresh scan, no clean</p></div>
+			</button>
+		{/if}
 	</div>
 
 	<!-- consumables + lifetime -->

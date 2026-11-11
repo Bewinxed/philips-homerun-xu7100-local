@@ -6,16 +6,19 @@
         "description": "Enter the address of the HomeRun Local backend that talks to your robot over the LAN.",
         "data": {
           "host": "Host",
-          "port": "Port"
+          "port": "Port",
+          "api_token": "API token"
         },
         "data_description": {
           "host": "IP address or hostname of the machine running the HomeRun backend (server.py).",
-          "port": "TCP port the backend listens on (default 8787)."
+          "port": "TCP port the backend listens on (default 8787).",
+          "api_token": "Only when Home Assistant isn't on one of the backend's trusted networks: the token from the backend's api_token file. Not needed with the Home Assistant app."
         }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect. Check the host and port, and that the HomeRun backend is running."
+      "cannot_connect": "Failed to connect. Check the host and port, and that the HomeRun backend is running.",
+      "invalid_auth": "The backend refused the API token."
     },
     "abort": {
       "already_configured": "This HomeRun backend is already configured."
@@ -34,32 +37,265 @@
   },
   "entity": {
     "sensor": {
-      "battery": { "name": "Battery" },
-      "clean_area": { "name": "Cleaned area" },
-      "clean_time": { "name": "Cleaning time" },
-      "status": { "name": "Status" },
-      "fault": { "name": "Fault" },
-      "side_brush": { "name": "Side brush" },
-      "main_brush": { "name": "Main brush" },
-      "filter": { "name": "Filter" },
-      "mop_cloth": { "name": "Mop cloth" },
-      "total_area": { "name": "Lifetime area" },
-      "total_cleans": { "name": "Lifetime cleans" },
-      "total_time": { "name": "Lifetime runtime" }
+      "battery": {
+        "name": "Battery"
+      },
+      "clean_area": {
+        "name": "Cleaned area"
+      },
+      "clean_time": {
+        "name": "Cleaning time"
+      },
+      "status": {
+        "name": "Status"
+      },
+      "fault": {
+        "name": "Fault"
+      },
+      "side_brush": {
+        "name": "Side brush"
+      },
+      "main_brush": {
+        "name": "Main brush"
+      },
+      "filter": {
+        "name": "Filter"
+      },
+      "mop_cloth": {
+        "name": "Mop cloth"
+      },
+      "total_area": {
+        "name": "Lifetime area"
+      },
+      "total_cleans": {
+        "name": "Lifetime cleans"
+      },
+      "total_time": {
+        "name": "Lifetime runtime"
+      }
     },
     "select": {
-      "water": { "name": "Water flow" }
+      "water": {
+        "name": "Water flow"
+      },
+      "floor": {
+        "name": "Map floor"
+      },
+      "schedule_mode": {
+        "name": "Schedule {number} mode",
+        "state": {
+          "both_work": "Vacuum and mop",
+          "only_sweep": "Vacuum",
+          "only_mop": "Mop",
+          "intensive": "Intensive",
+          "quiet": "Quiet"
+        }
+      },
+      "schedule_suction": {
+        "name": "Schedule {number} suction",
+        "state": {
+          "closed": "Off",
+          "gentle": "Gentle",
+          "normal": "Normal",
+          "strong": "Strong",
+          "max": "Max"
+        }
+      },
+      "schedule_water": {
+        "name": "Schedule {number} water",
+        "state": {
+          "closed": "Off",
+          "low": "Low",
+          "middle": "Medium",
+          "high": "High"
+        }
+      },
+      "schedule_repeat": {
+        "name": "Schedule {number} repeat",
+        "state": {
+          "1": "1x",
+          "2": "2x",
+          "5": "5x"
+        }
+      }
     },
     "number": {
-      "volume": { "name": "Volume" }
+      "volume": {
+        "name": "Volume"
+      }
     },
     "button": {
-      "empty_bin": { "name": "Empty bin" },
-      "start_mapping": { "name": "Start mapping" },
-      "locate": { "name": "Locate" }
+      "empty_bin": {
+        "name": "Empty bin"
+      },
+      "start_mapping": {
+        "name": "Start mapping"
+      },
+      "locate": {
+        "name": "Locate"
+      }
     },
     "camera": {
-      "map": { "name": "Map" }
+      "map": {
+        "name": "Map"
+      }
+    },
+    "switch": {
+      "schedule": {
+        "name": "Schedule {number}"
+      }
+    },
+    "time": {
+      "schedule_time": {
+        "name": "Schedule {number} time"
+      }
+    },
+    "text": {
+      "schedule_days": {
+        "name": "Schedule {number} days"
+      }
+    }
+  },
+  "selector": {
+    "day": {
+      "options": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      }
+    },
+    "schedule_mode": {
+      "options": {
+        "both_work": "Vacuum and mop",
+        "only_sweep": "Vacuum",
+        "only_mop": "Mop",
+        "intensive": "Intensive",
+        "quiet": "Quiet"
+      }
+    },
+    "schedule_suction": {
+      "options": {
+        "closed": "Off",
+        "gentle": "Gentle",
+        "normal": "Normal",
+        "strong": "Strong",
+        "max": "Max"
+      }
+    },
+    "schedule_water": {
+      "options": {
+        "closed": "Off",
+        "low": "Low",
+        "middle": "Medium",
+        "high": "High"
+      }
+    },
+    "schedule_repeat": {
+      "options": {
+        "1": "1x",
+        "2": "2x",
+        "5": "5x"
+      }
+    }
+  },
+  "services": {
+    "add_schedule": {
+      "name": "Add schedule",
+      "description": "Add a cleaning schedule for the whole floor the robot is on.",
+      "fields": {
+        "time": {
+          "name": "Time",
+          "description": "Start time (HH:MM)."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days to clean on; none = once."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether the schedule is on."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "Cleaning mode, as in the app."
+        },
+        "suction": {
+          "name": "Suction",
+          "description": "Suction power."
+        },
+        "water": {
+          "name": "Water",
+          "description": "Mop water flow."
+        },
+        "repeat": {
+          "name": "Repeat",
+          "description": "How many times the robot cleans the floor (1, 2 or 5)."
+        },
+        "config_entry_id": {
+          "name": "Robot",
+          "description": "Only needed with more than one robot."
+        }
+      }
+    },
+    "set_schedule": {
+      "name": "Change schedule",
+      "description": "Change the time, days, on/off state or cleaning settings of a schedule.",
+      "fields": {
+        "schedule": {
+          "name": "Schedule",
+          "description": "Schedule number, as in the entity names (1 = the first)."
+        },
+        "time": {
+          "name": "Time",
+          "description": "Start time (HH:MM)."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days to clean on; none = once."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether the schedule is on."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "Cleaning mode, as in the app."
+        },
+        "suction": {
+          "name": "Suction",
+          "description": "Suction power."
+        },
+        "water": {
+          "name": "Water",
+          "description": "Mop water flow."
+        },
+        "repeat": {
+          "name": "Repeat",
+          "description": "How many times the robot cleans the floor (1, 2 or 5)."
+        },
+        "config_entry_id": {
+          "name": "Robot",
+          "description": "Only needed with more than one robot."
+        }
+      }
+    },
+    "delete_schedule": {
+      "name": "Delete schedule",
+      "description": "Delete a cleaning schedule.",
+      "fields": {
+        "schedule": {
+          "name": "Schedule",
+          "description": "Schedule number, as in the entity names (1 = the first)."
+        },
+        "config_entry_id": {
+          "name": "Robot",
+          "description": "Only needed with more than one robot."
+        }
+      }
     }
   }
 }

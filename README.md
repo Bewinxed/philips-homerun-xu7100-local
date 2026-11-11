@@ -12,6 +12,12 @@ Built and verified on the **Philips HomeRun XU7100** (ODM name "Dustin 7100", fi
 
 The rest of the Philips HomeRun line (for example the XU3000, XU5000, and XU9000 series) and other Tuya-based laser vacuums share the same protocol family, so most of this is likely to apply with some datapoint adjustments. The exact datapoint numbers and command frames were read from one specific robot, so treat them as a strong starting point rather than a guarantee for another model. Use `./homerun learn` and `./homerun sniff` to confirm the datapoints on your unit before writing to them.
 
+### Other models
+
+The DP map is per model. `./homerun key` (or `./homerun learn model`) pulls your robot's own cloud thing model and writes `backend/models/<product_id>.json`, which then replaces the XU7100 defaults: DP numbers, suction and water levels, consumable lifetimes and fault labels all come from your device. The web UI and Home Assistant only offer what that model actually has (for example no empty-bin button without an auto-empty dock). Without a model file, the hand-verified XU7100 schema in `backend/dp_schema.json` is used. If a model file works on your robot, consider contributing it.
+
+Room-clean, zone and goto frames (`command_trans`) are shared across the Tuya laser family but have only been verified on the XU7100.
+
 ## Why this exists
 
 The robot stopped returning to its dock and got stuck on an old map. A factory reset did not help, and there was no local repair option. This project came out of reverse-engineering how it talks on the network, so it can run entirely from the LAN instead of being replaced.
@@ -87,14 +93,7 @@ Then add the integration (Settings → Devices & Services → Add Integration �
 
 ### Interactive map card
 
-For a live, tappable map inside Lovelace (colour-filled rooms, robot and dock markers, tap rooms to clean), there is a custom card in [lovelace/homerun-map-card.js](lovelace/homerun-map-card.js). Copy it into `<config>/www/`, add it as a dashboard resource (`/local/homerun-map-card.js`, type module), then use:
-
-```yaml
-type: custom:homerun-map-card
-# url: http://192.168.1.50:8787   # optional; defaults to <this-host>:8787
-```
-
-The card talks to the backend directly from the browser, which is why the backend sends permissive CORS headers on `/api/*`.
+The map card lives in its own repository so the Marketplace (HACS) can install it as a dashboard card: [coen1111/homerun-map-card](https://github.com/coen1111/homerun-map-card). It shows the floors, rooms, no-go and no-mop zones, virtual walls, dock and last route, and cleans the rooms you tap. It talks only to Home Assistant itself (this integration's authenticated proxy, or the Home Assistant app's ingress), so it works on https and away from home without opening the backend's port. `lovelace/homerun-map-card.js` is a copy for manual installs.
 
 ## Documentation
 
@@ -108,6 +107,16 @@ The card talks to the backend directly from the browser, which is why the backen
 This project is not affiliated with Philips or Tuya. It was built by observing traffic to and from one robot, so the datapoint numbers and command frames are specific to this model and firmware and may differ on yours. Some frames were confirmed by watching the robot move rather than from an official spec. Treat the undocumented datapoints as unsafe to write blindly, since one of them is plausibly a map reset.
 
 Secrets stay out of the repo. `config.json`, `robot_secrets.json`, the ElevenLabs key, and the saved home map are all gitignored. Copy the `.example` files and fill in real values before running.
+
+### Who can use the API
+
+The backend listens on every interface, so its `/api` is protected (`backend/access.py`):
+
+- Requests from a **trusted network** are allowed: by default only this machine. Set others with `"trusted_networks": ["192.168.1.0/24"]` in `config.json` or `HOMERUN_TRUSTED_NETWORKS`.
+- Everyone else needs the **API token**: `"api_token"` in `config.json` or `HOMERUN_API_TOKEN`. Without one, a random token is written to `api_token` (gitignored) on first start. Send it as `Authorization: Bearer <token>` or `X-HomeRun-Token`. The web UI asks for it once and keeps it as a same-site cookie.
+- Other websites get no CORS access unless their origin is listed in `"cors_origins"` (`HOMERUN_CORS_ORIGINS`), for example a dashboard calling the backend directly.
+
+The Home Assistant integration has an optional token field. Its map-card proxy only passes the read and control calls the card needs, so a Home Assistant login doesn't give raw datapoint access.
 
 ## License
 

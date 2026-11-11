@@ -23,10 +23,18 @@ class HomeRunApiError(Exception):
 class HomeRunApiClient:
     """Small wrapper around the local backend using the HA shared session."""
 
-    def __init__(self, session: aiohttp.ClientSession, host: str, port: int) -> None:
+    def __init__(
+        self, session: aiohttp.ClientSession, host: str, port: int, token: str | None = None
+    ) -> None:
         self._session = session
         self._host = host
         self._port = int(port)
+        # only needed when Home Assistant isn't on one of the backend's trusted networks
+        self._token = token or None
+
+    @property
+    def auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
     @property
     def base_url(self) -> str:
@@ -37,7 +45,7 @@ class HomeRunApiClient:
         url = f"{self.base_url}/api/state"
         try:
             async with asyncio.timeout(10):
-                async with self._session.get(url) as resp:
+                async with self._session.get(url, headers=self.auth_headers) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
         except (aiohttp.ClientError, TimeoutError) as err:
@@ -63,7 +71,7 @@ class HomeRunApiClient:
         url = f"{self.base_url}/api/diagnostics"
         try:
             async with asyncio.timeout(10):
-                async with self._session.get(url) as resp:
+                async with self._session.get(url, headers=self.auth_headers) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
         except (aiohttp.ClientError, TimeoutError) as err:
@@ -86,12 +94,40 @@ class HomeRunApiClient:
         """POST /api/mapping — start a fresh mapping run."""
         await self._post("/api/mapping", {})
 
+    # Writing schedules waits for the robot to confirm them (up to ~15 s)
+    async def async_edit_schedule(self, index: int, patch: dict[str, Any]) -> None:
+        """POST /api/schedules/<index> with any of enabled, days, time."""
+        await self._post(f"/api/schedules/{int(index)}", patch, timeout=30)
+
+    async def async_add_schedule(self, data: dict[str, Any]) -> None:
+        """POST /api/schedules/add — a whole-floor schedule."""
+        await self._post("/api/schedules/add", data, timeout=30)
+
+    async def async_delete_schedule(self, index: int) -> None:
+        await self._post(f"/api/schedules/{int(index)}/delete", {}, timeout=30)
+
+    async def async_get_floors(self) -> dict[str, Any]:
+        """GET /api/floors — stored maps (one per floor) and the selected one."""
+        url = f"{self.base_url}/api/floors"
+        try:
+            async with asyncio.timeout(20):
+                async with self._session.get(url, headers=self.auth_headers) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise HomeRunApiError(f"Error fetching floors from {url}: {err}") from err
+        return data if isinstance(data, dict) else {}
+
+    async def async_select_floor(self, floor_id: int) -> None:
+        """POST /api/floors/select — which floor's map the camera shows."""
+        await self._post("/api/floors/select", {"id": floor_id})
+
     async def async_get_map_png(self) -> bytes | None:
         """Fetch the latest map PNG, or None when the backend returns 404."""
         url = f"{self.base_url}/api/map"
         try:
             async with asyncio.timeout(15):
-                async with self._session.get(url) as resp:
+                async with self._session.get(url, headers=self.auth_headers) as resp:
                     if resp.status == 404:
                         return None
                     resp.raise_for_status()
@@ -99,12 +135,17 @@ class HomeRunApiClient:
         except (aiohttp.ClientError, TimeoutError) as err:
             raise HomeRunApiError(f"Error fetching map from {url}: {err}") from err
 
-    async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    async def _post(self, path: str, body: dict[str, Any], timeout: float = 10) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         try:
-            async with asyncio.timeout(10):
-                async with self._session.post(url, json=body) as resp:
-                    resp.raise_for_status()
+            async with asyncio.timeout(timeout):
+                async with self._session.post(url, json=body, headers=self.auth_headers) as resp:
+                    if resp.status >= 400:
+                        try:
+                            msg = (await resp.json()).get("error")
+                        except (aiohttp.ContentTypeError, ValueError):
+                            msg = None
+                        raise HomeRunApiError(msg or f"HTTP {resp.status} from {url}")
                     try:
                         return await resp.json()
                     except aiohttp.ContentTypeError:
