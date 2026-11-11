@@ -2,9 +2,10 @@
 
 The schedules come with /api/diagnostics (diagnostics["schedules"]); each one
 gets an on/off switch, a time, a days text and selects for its cleaning
-settings (mode, suction, water, repeat). Schedules added later
-(in the app, the sidebar UI or with homerun_local.add_schedule) get theirs on
-the next poll; a deleted schedule's entities become unavailable.
+settings (mode, suction, water, repeat). All 8 slots the robot has get their
+entities up front, so dashboards can refer to them before a schedule exists; a
+slot without a schedule is unavailable (and becomes available on the next poll
+after one is added in the app, the sidebar UI or with homerun_local.add_schedule).
 """
 
 from __future__ import annotations
@@ -22,6 +23,9 @@ from .entity import HomeRunEntity
 
 _LOGGER = logging.getLogger(__name__)
 
+# The robot keeps at most 8 schedules (the "max" byte of its DP 32 frame)
+MAX_SCHEDULES = 8
+
 
 def schedules(coordinator: HomeRunCoordinator) -> list[dict[str, Any]]:
     return (coordinator.diagnostics or {}).get("schedules") or []
@@ -33,13 +37,14 @@ def setup_schedule_platform(
     async_add_entities: AddEntitiesCallback,
     factory: Callable[[HomeRunCoordinator, HomeRunConfigEntry, int], HomeRunEntity],
 ) -> None:
-    """Add one entity per schedule now, and for new schedules as they appear."""
+    """Add one entity per schedule slot now, and for any slot past 8 as it appears."""
     coordinator = entry.runtime_data
     added: set[int] = set()
 
     @callback
     def _add_new() -> None:
-        new = [i for i in range(len(schedules(coordinator))) if i not in added]
+        slots = max(MAX_SCHEDULES, len(schedules(coordinator)))
+        new = [i for i in range(slots) if i not in added]
         if new:
             added.update(new)
             async_add_entities(factory(coordinator, entry, i) for i in new)
