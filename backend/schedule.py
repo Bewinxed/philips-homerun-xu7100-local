@@ -14,7 +14,7 @@ The robot reports its schedules as one 0xAB frame (see docs/COMMAND_PROTOCOL.md)
     settings (11 bytes), values as in the robot's thing model:
       0  mode     work_mode:  0 both_work (vacuum + mop), 1 only_sweep, 2 only_mop,
                               3 intensive, 4 quiet
-      1  repeat   index into clean_times [1, 2, 5]  (1x = 0; 2x/5x not yet seen from the app)
+      1  repeat   index into clean_times [1, 2, 5]  (1x = 0, 2x = 1; checked against the app)
       2  order    position of a room in a room schedule
       5  suction  suction:    0 closed, 1 gentle, 2 normal, 3 strong, 4 max
       6  water    cistern:    0 closed, 1 low, 2 middle, 3 high

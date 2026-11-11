@@ -171,7 +171,7 @@ schedule = status days hour minute 0x00 type nRooms [room * nRooms | settings(11
   room    id(1) + settings(11)
 settings = mode repeat order 00 00 suction water FF FF FF FF
   mode    work_mode:  0 both_work (vacuum + mop), 1 only_sweep, 2 only_mop, 3 intensive, 4 quiet
-  repeat  index into clean_times [1, 2, 5]   (1x = 0 is verified; 2x / 5x are inferred)
+  repeat  index into clean_times [1, 2, 5]   (1x = 0 and 2x = 1 verified against the app)
   order   position of the room in a room schedule (0 for whole floor)
   suction 0 closed, 1 gentle, 2 normal, 3 strong, 4 max
   water   cistern: 0 closed, 1 low, 2 middle, 3 high
